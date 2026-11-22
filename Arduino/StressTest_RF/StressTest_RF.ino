@@ -1,0 +1,221 @@
+/*************************************************
+ * StressTest_RF
+ * 433 MHz RF 入口的壓力測試韌體（Arduino Nano V3.0 + RCSwitch）
+ *
+ * 序列協定與 StressTest_Opto 相同（115200 baud，每行以 \n 結尾）
+ *   Unity -> Arduino
+ *     HELLO                        要求回報身分
+ *     ONE,<START|UP|DOWN|STOP>     單發一次 RF 指令
+ *     RUN,<UP|DOWN>,<n>,<gap_ms>   連續發送 n 次；每次動作完成後休息 gap_ms
+ *   Arduino -> Unity
+ *     READY,RF,<版本>,<參數>       開機或回應 HELLO
+ *     ACK,<原指令>                 已接受（ONE 在執行後、RUN 在開始前回覆）
+ *     T,<i>,<start_us>,<end_us>    RUN 第 i 筆的開始／結束時間（整段結束後才送）
+ *     DONE,<n_sent>                RUN 完成
+ *     ERR,<原因>                   格式錯誤、不支援或忙碌中
+ *
+ * 單筆動作沿用正式版 RfSender：24 bit 代碼、重送 2 次，送出後保留 250 ms 釋放時間。
+ * 相對於正式版移除：800 ms 全域冷卻、1000 ms 同指令冷卻、RF 接收功能與其 20／50 ms 延遲。
+ * 間隔完全由 RUN 的 gap_ms 決定。
+ *************************************************/
+
+#include <RCSwitch.h>
+
+const char FIRMWARE_VERSION[] = "0.2.0";
+const unsigned long BAUD_RATE = 115200;
+
+// ===== RF 發射 =====
+RCSwitch rf = RCSwitch();
+const int TX_PIN = 10;
+const int CODE_BITS = 24;
+const int REPEAT_TRANSMIT = 2;
+
+const unsigned long CODE_START = 16776974;
+const unsigned long CODE_UP    = 16776972;
+const unsigned long CODE_DOWN  = 16776970;
+const unsigned long CODE_STOP  = 16776971;
+
+// ===== 單筆動作參數 =====
+const unsigned long RELEASE_MS = 250;   // 讓跑步機接收端判定「放開按鍵」
+// protocol 1：每 frame (24 × 4 + 32) × 350 µs ≈ 44.8 ms，重送 2 次再加釋放時間
+const unsigned long ACTION_MS = 340;
+
+// ===== RUN 參數 =====
+const int MAX_RUN_COUNT = 32;           // 時間戳存 RAM：32 × 8 bytes
+const unsigned long MAX_GAP_MS = 10000;
+unsigned long runStart[MAX_RUN_COUNT];
+unsigned long runEnd[MAX_RUN_COUNT];
+
+// ===== 指令行緩衝 =====
+const int LINE_CAPACITY = 48;
+char lineBuffer[LINE_CAPACITY];
+int lineLength = 0;
+bool lineOverflow = false;
+
+void sendReady() {
+  Serial.print(F("READY,RF,"));
+  Serial.print(FIRMWARE_VERSION);
+  Serial.print(F(",bits="));
+  Serial.print(CODE_BITS);
+  Serial.print(F(";repeat="));
+  Serial.print(REPEAT_TRANSMIT);
+  Serial.print(F(";release_ms="));
+  Serial.print(RELEASE_MS);
+  Serial.print(F(";action_ms="));
+  Serial.println(ACTION_MS);
+}
+
+void transmit(unsigned long code) {
+  rf.send(code, CODE_BITS);
+  delay(RELEASE_MS);
+}
+
+// 將指令名稱對應到 RF 代碼；不認得回傳 0
+unsigned long codeForCommand(const char* name) {
+  if (strcmp(name, "START") == 0) return CODE_START;
+  if (strcmp(name, "UP") == 0)    return CODE_UP;
+  if (strcmp(name, "DOWN") == 0)  return CODE_DOWN;
+  if (strcmp(name, "STOP") == 0)  return CODE_STOP;
+  return 0;
+}
+
+// RUN 期間只計算收到幾行指令，不執行
+int busyLines = 0;
+
+void drainSerialWhileBusy() {
+  while (Serial.available() > 0) {
+    if (Serial.read() == '\n') busyLines++;
+  }
+}
+
+// 解析 "UP,20,5" 這類參數；成功回傳 true
+bool parseRun(char* args, unsigned long* code, int* count, unsigned long* gapMs) {
+  char* dir = strtok(args, ",");
+  char* countText = strtok(NULL, ",");
+  char* gapText = strtok(NULL, ",");
+  if (dir == NULL || countText == NULL || gapText == NULL || strtok(NULL, ",") != NULL) return false;
+
+  if (strcmp(dir, "UP") == 0) *code = CODE_UP;
+  else if (strcmp(dir, "DOWN") == 0) *code = CODE_DOWN;
+  else return false;
+
+  long n = atol(countText);
+  long g = atol(gapText);
+  if (n < 1 || n > MAX_RUN_COUNT) return false;
+  if (g < 0 || (unsigned long)g > MAX_GAP_MS) return false;
+  if (g == 0 && strcmp(gapText, "0") != 0) return false;
+
+  *count = (int)n;
+  *gapMs = (unsigned long)g;
+  return true;
+}
+
+void runSegment(unsigned long code, int count, unsigned long gapMs) {
+  unsigned long gapUs = gapMs * 1000UL;
+
+  for (int i = 0; i < count; i++) {
+    runStart[i] = micros();
+    transmit(code);
+    runEnd[i] = micros();
+
+    if (i < count - 1) {
+      while (micros() - runEnd[i] < gapUs) {
+        drainSerialWhileBusy();
+      }
+    }
+    drainSerialWhileBusy();
+  }
+
+  for (int i = 0; i < count; i++) {
+    Serial.print(F("T,"));
+    Serial.print(i);
+    Serial.print(',');
+    Serial.print(runStart[i]);
+    Serial.print(',');
+    Serial.println(runEnd[i]);
+  }
+  Serial.print(F("DONE,"));
+  Serial.println(count);
+
+  // RUN 期間收到的指令一律不執行
+  for (; busyLines > 0; busyLines--) {
+    Serial.println(F("ERR,BUSY"));
+  }
+  lineLength = 0;
+  lineOverflow = false;
+}
+
+void handleLine(char* line) {
+  if (strcmp(line, "HELLO") == 0) {
+    sendReady();
+    return;
+  }
+
+  if (strncmp(line, "ONE,", 4) == 0) {
+    unsigned long code = codeForCommand(line + 4);
+    if (code == 0) {
+      Serial.println(F("ERR,BAD_COMMAND"));
+      return;
+    }
+    transmit(code);
+    Serial.print(F("ACK,"));
+    Serial.println(line);
+    return;
+  }
+
+  if (strncmp(line, "RUN,", 4) == 0) {
+    // 先保留原指令（strtok 會改寫緩衝）
+    char original[LINE_CAPACITY];
+    strncpy(original, line, LINE_CAPACITY);
+    original[LINE_CAPACITY - 1] = '\0';
+
+    unsigned long code;
+    int count;
+    unsigned long gapMs;
+    if (!parseRun(line + 4, &code, &count, &gapMs)) {
+      Serial.println(F("ERR,BAD_RUN"));
+      return;
+    }
+    Serial.print(F("ACK,"));
+    Serial.println(original);
+    Serial.flush();  // ACK 送完才開始計時，避免傳輸占用第一筆
+    runSegment(code, count, gapMs);
+    return;
+  }
+
+  Serial.println(F("ERR,UNKNOWN"));
+}
+
+void setup() {
+  rf.enableTransmit(TX_PIN);
+  rf.setRepeatTransmit(REPEAT_TRANSMIT);
+
+  Serial.begin(BAUD_RATE);
+  sendReady();
+}
+
+void loop() {
+  while (Serial.available() > 0) {
+    char c = Serial.read();
+
+    if (c == '\r') continue;
+
+    if (c == '\n') {
+      if (lineOverflow) {
+        Serial.println(F("ERR,LINE_TOO_LONG"));
+      } else if (lineLength > 0) {
+        lineBuffer[lineLength] = '\0';
+        handleLine(lineBuffer);
+      }
+      lineLength = 0;
+      lineOverflow = false;
+      continue;
+    }
+
+    if (lineLength < LINE_CAPACITY - 1) {
+      lineBuffer[lineLength++] = c;
+    } else {
+      lineOverflow = true;
+    }
+  }
+}

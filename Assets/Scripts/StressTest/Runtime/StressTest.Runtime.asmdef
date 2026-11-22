@@ -1,0 +1,16 @@
+{
+    "name": "StressTest.Runtime",
+    "rootNamespace": "StressTest.Runtime",
+    "references": [
+        "StressTest.Core"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

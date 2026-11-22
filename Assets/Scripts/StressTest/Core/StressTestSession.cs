@@ -1,0 +1,202 @@
+using System;
+using System.Collections.Generic;
+
+namespace StressTest.Core
+{
+    /// <summary>
+    /// 壓力測試的核心：透過 ISerialLink 與測試韌體交談，維護連線狀態。
+    /// 不依賴 UnityEngine；由介面層每格呼叫 Poll。
+    /// </summary>
+    public sealed class StressTestSession
+    {
+        private readonly ISerialLink _link;
+        private readonly EntryType _expectedEntry;
+        private double _handshakeDeadline;
+
+        /// <summary>送出 HELLO 後等待 READY 的秒數。Nano 開埠重設約需 2 秒。</summary>
+        public const double HandshakeTimeoutSeconds = 4.0;
+
+        private const int DefaultActionMs = 500;
+        private double _segmentDeadline;
+
+        public StressTestSession(ISerialLink link, EntryType expectedEntry)
+        {
+            _link = link ?? throw new ArgumentNullException(nameof(link));
+            _expectedEntry = expectedEntry;
+        }
+
+        public SessionState State { get; private set; } = SessionState.Disconnected;
+        public FirmwareInfo Firmware { get; private set; }
+
+        /// <summary>韌體最後一次 ACK 的原指令，例如 "ONE,UP"。</summary>
+        public string LastAck { get; private set; }
+
+        /// <summary>韌體已 ACK 的單發指令總數，用來確認每次單發都被執行。</summary>
+        public int SingleAckCount { get; private set; }
+
+        /// <summary>韌體最後一次 ERR 的原因；送出新指令時清除。</summary>
+        public string LastError { get; private set; }
+
+        public void BeginHandshake(double now)
+        {
+            State = SessionState.Handshaking;
+            _handshakeDeadline = now + HandshakeTimeoutSeconds;
+            _link.WriteLine("HELLO");
+        }
+
+        /// <summary>僅在 Ready 狀態送出單發指令；其他狀態拒絕並回傳 false。</summary>
+        public bool SendSingle(SingleCommand command)
+        {
+            if (State != SessionState.Ready) return false;
+
+            LastError = null;
+            _link.WriteLine("ONE," + ToProtocol(command));
+            return true;
+        }
+
+        public SegmentRun CurrentSegment { get; private set; }
+
+        /// <summary>
+        /// 上一段逾時後，韌體可能還在執行並稍後送出 T／DONE。
+        /// 收到遲到的 DONE（或韌體重新開機的 READY）之前不可開始下一段，以免舊回報混入新段。
+        /// </summary>
+        public bool WaitingForLateDone { get; private set; }
+
+        /// <summary>
+        /// 僅在 Ready 狀態要求韌體連續送出 count 筆；每筆動作完成後休息 gapMs 再送下一筆。
+        /// </summary>
+        public bool RunSegment(SegmentDirection direction, int count, int gapMs, double startSpeed, double now)
+        {
+            if (State != SessionState.Ready || WaitingForLateDone) return false;
+
+            LastError = null;
+            CurrentSegment = new SegmentRun(direction, count, gapMs, startSpeed);
+            State = SessionState.RunningSegment;
+            _segmentDeadline = now + SegmentTimeoutSeconds(count, gapMs);
+            _link.WriteLine($"RUN,{(direction == SegmentDirection.Up ? "UP" : "DOWN")},{count},{gapMs}");
+            return true;
+        }
+
+        /// <summary>
+        /// 在 AwaitingReading 狀態輸入面板速度，完成本段並回到 Ready；其他狀態回傳 null。
+        /// </summary>
+        public SegmentResult SubmitReading(double panelSpeed)
+        {
+            if (State != SessionState.AwaitingReading) return null;
+
+            State = SessionState.Ready;
+            return new SegmentResult(CurrentSegment, panelSpeed);
+        }
+
+        public void Poll(double now)
+        {
+            while (_link.TryReadLine(out var line))
+            {
+                HandleLine(line);
+            }
+
+            if (State == SessionState.Handshaking && now > _handshakeDeadline)
+            {
+                State = SessionState.HandshakeTimeout;
+            }
+
+            if (State == SessionState.RunningSegment && now > _segmentDeadline)
+            {
+                CurrentSegment.TimedOut = true;
+                WaitingForLateDone = true;
+                State = SessionState.AwaitingReading;
+            }
+        }
+
+        /// <summary>
+        /// 段逾時 = 應送筆數 ×（單筆動作時間 + 間隔）× 2 + 2 秒。
+        /// 單筆動作時間取韌體回報的 action_ms，未回報時保守採 500 ms。
+        /// </summary>
+        private double SegmentTimeoutSeconds(int count, int gapMs)
+        {
+            var actionMs = DefaultActionMs;
+            if (Firmware != null && Firmware.Parameters.TryGetValue("action_ms", out var text)
+                && int.TryParse(text, out var reported))
+            {
+                actionMs = reported;
+            }
+            return count * (actionMs + gapMs) * 2 / 1000.0 + 2.0;
+        }
+
+        private void HandleLine(string line)
+        {
+            var fields = line.Split(',');
+            if (WaitingForLateDone && (fields[0] == "T" || fields[0] == "DONE"))
+            {
+                // 逾時那一段的遲到回報：丟棄，DONE 代表韌體已回到待命
+                if (fields[0] == "DONE") WaitingForLateDone = false;
+                return;
+            }
+            if (State == SessionState.RunningSegment)
+            {
+                if (fields[0] == "T" && fields.Length == 4
+                    && int.TryParse(fields[1], out var index)
+                    && long.TryParse(fields[2], out var start)
+                    && long.TryParse(fields[3], out var end))
+                {
+                    CurrentSegment.AddTimestamp(new CommandTimestamp(index, start, end));
+                    return;
+                }
+                if (fields[0] == "DONE" && fields.Length == 2 && int.TryParse(fields[1], out var sent))
+                {
+                    CurrentSegment.ReportedCount = sent;
+                    State = SessionState.AwaitingReading;
+                    return;
+                }
+            }
+            if (fields[0] == "ACK" && fields.Length >= 2)
+            {
+                LastAck = line.Substring("ACK,".Length);
+                if (fields[1] == "ONE") SingleAckCount++;
+                return;
+            }
+            if (fields[0] == "ERR")
+            {
+                LastError = fields.Length >= 2 ? line.Substring("ERR,".Length) : "UNKNOWN";
+                return;
+            }
+            if (fields[0] == "READY" && fields.Length >= 3 && TryParseEntry(fields[1], out var entry))
+            {
+                var parameters = new Dictionary<string, string>();
+                if (fields.Length >= 4)
+                {
+                    foreach (var pair in fields[3].Split(';'))
+                    {
+                        var kv = pair.Split('=');
+                        if (kv.Length == 2) parameters[kv[0]] = kv[1];
+                    }
+                }
+                Firmware = new FirmwareInfo(entry, fields[2], parameters);
+                WaitingForLateDone = false; // 韌體重新開機，不會再有舊段的回報
+                State = entry == _expectedEntry ? SessionState.Ready : SessionState.EntryMismatch;
+            }
+        }
+
+        private static string ToProtocol(SingleCommand command)
+        {
+            switch (command)
+            {
+                case SingleCommand.Start: return "START";
+                case SingleCommand.Up: return "UP";
+                case SingleCommand.Down: return "DOWN";
+                case SingleCommand.Stop: return "STOP";
+                default: throw new ArgumentOutOfRangeException(nameof(command), command, null);
+            }
+        }
+
+        private static bool TryParseEntry(string text, out EntryType entry)
+        {
+            switch (text)
+            {
+                case "OPTO": entry = EntryType.Opto; return true;
+                case "RF": entry = EntryType.Rf; return true;
+                default: entry = default; return false;
+            }
+        }
+    }
+}
