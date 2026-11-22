@@ -77,8 +77,8 @@ namespace StressTest.Runtime
                 ? $"　段 {r.SegmentIndex + 1}／{r.Plan.Segments.Count}"
                 : "";
             GUILayout.Label($"本輪：間隔 {r.Config.GapMs} ms、{r.Config.TotalCount} 次{segmentText}", _title);
-            GUILayout.Label("輪次 ID：" + r.RoundId, _body);
-            GUILayout.Space(12);
+            GUILayout.Label("輪次 ID：" + r.RoundId, _small);
+            GUILayout.Space(Px(12));
 
             switch (r.State)
             {
@@ -112,7 +112,7 @@ namespace StressTest.Runtime
                     var reading = r.WarmupReading ?? 0;
                     GUILayout.Label($"面板是 {reading:F1} km/h，預期 {r.Config.BaseSpeed:F1} km/h", _huge);
                     GUILayout.BeginHorizontal();
-                    if (GUILayout.Button("重新預熱（補足差額）", _big)) r.Rewarm(Time.realtimeSinceStartupAsDouble);
+                    PrimaryButton("重新預熱（補足差額）", () => r.Rewarm(Time.realtimeSinceStartupAsDouble));
                     if (GUILayout.Button($"以 {reading:F1} 為起點繼續", _big)) r.ContinueFromReading(Time.realtimeSinceStartupAsDouble);
                     GUILayout.EndHorizontal();
                     break;
@@ -161,17 +161,17 @@ namespace StressTest.Runtime
             if (r.State == RoundState.Completed && !r.IsVoided)
             {
                 GUILayout.BeginHorizontal();
-                GUILayout.Label("作廢原因", _body, GUILayout.Width(90));
+                GUILayout.Label("作廢原因", _body, GUILayout.Width(Px(90)));
                 GUI.SetNextControlName(VoidReasonControl);
                 _voidReasonText = GUILayout.TextField(_voidReasonText, _input);
                 GUI.enabled = _voidReasonText.Trim().Length > 0;
-                if (GUILayout.Button("作廢此輪", _big, GUILayout.Width(160))) LeaveRound(_voidReasonText.Trim());
+                if (GUILayout.Button("作廢此輪", _big, GUILayout.Width(Px(160)))) LeaveRound(_voidReasonText.Trim());
                 GUI.enabled = true;
                 GUILayout.EndHorizontal();
-                GUILayout.Label("作廢的輪次原始資料保留，但不計入條件進度。", _body);
+                GUILayout.Label("作廢的輪次原始資料保留，但不計入條件進度。", _small);
             }
 
-            if (GUILayout.Button(leaveLabel, _big)) LeaveRound(null);
+            PrimaryButton(leaveLabel, () => LeaveRound(null));
         }
 
         private void LeaveRound(string voidReason)
@@ -229,26 +229,6 @@ namespace StressTest.Runtime
             _session.SendSingle(SingleCommand.Stop);
         }
 
-        private void DrawEmergencyStop()
-        {
-            var e = Event.current;
-            // 作廢原因欄位要能輸入空白，聚焦在那裡時不攔截空白鍵
-            if (e.type == EventType.KeyDown && e.keyCode == KeyCode.Space
-                && GUI.GetNameOfFocusedControl() != VoidReasonControl)
-            {
-                EmergencyStop();
-                e.Use();
-            }
-
-            var previous = GUI.backgroundColor;
-            GUI.backgroundColor = Color.red;
-            var style = new GUIStyle(_big) { fontSize = 26, fontStyle = FontStyle.Bold, fixedHeight = 60 };
-            GUI.enabled = _session != null;
-            if (GUILayout.Button("緊急停止（空白鍵）", style)) EmergencyStop();
-            GUI.enabled = true;
-            GUI.backgroundColor = previous;
-        }
-
         private void DrawConfirmKeys(string confirmLabel)
         {
             var e = Event.current;
@@ -267,8 +247,8 @@ namespace StressTest.Runtime
             }
 
             GUILayout.BeginHorizontal();
-            if (GUILayout.Button(confirmLabel + "（Enter）", _big)) ConfirmRound();
-            if (GUILayout.Button("修改輸入（Esc）", _big, GUILayout.Width(220))) UndoRound();
+            PrimaryButton(confirmLabel + "（Enter）", ConfirmRound);
+            if (GUILayout.Button("修改輸入（Esc）", _big, GUILayout.Width(Px(220)))) UndoRound();
             GUILayout.EndHorizontal();
         }
 
@@ -314,11 +294,11 @@ namespace StressTest.Runtime
                 GUILayout.Label(
                     $"段 {i + 1}：{DirectionLabels[(int)result.Segment.Direction]} {result.Segment.Count} 筆，" +
                     $"{result.Segment.StartSpeed:F1} → {result.ActualEndSpeed:F1}，掉包 {result.Drops}{flags}",
-                    _body);
+                    _small);
             }
             GUILayout.Label(
-                $"實際間隔：平均 {summary.MeanGapMicros / 1000.0:F3} ms、最大 {summary.MaxGapMicros / 1000.0:F3} ms", _body);
-            if (_roundLogFolder != null) GUILayout.Label("紀錄位置：" + _roundLogFolder, _body);
+                $"實際間隔：平均 {summary.MeanGapMicros / 1000.0:F3} ms、最大 {summary.MaxGapMicros / 1000.0:F3} ms", _small);
+            if (_roundLogFolder != null) GUILayout.Label("紀錄位置：" + _roundLogFolder, _small);
         }
     }
 }

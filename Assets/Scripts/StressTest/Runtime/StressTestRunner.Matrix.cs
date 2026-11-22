@@ -75,92 +75,89 @@ namespace StressTest.Runtime
             return false;
         }
 
-        private void DrawRoundSetup()
+        /// <summary>右側：條件矩陣、輪數設定、排程建議。格子是次要按鈕，只有閒置時可按。</summary>
+        private void DrawMatrixPanel()
         {
-            GUILayout.Label("完整一輪：條件矩陣", _title);
-            if (_restoreMessage != null) GUILayout.Label(_restoreMessage, _body);
-            if (_roundMessage != null) GUILayout.Label(_roundMessage, _body);
+            GUILayout.Label("條件矩陣", _title);
+            if (_restoreMessage != null) GUILayout.Label(_restoreMessage, _small);
 
+            GUI.enabled = _round == null;
             GUILayout.BeginHorizontal();
-            GUILayout.Label("每條件輪數", _body, GUILayout.Width(110));
-            _repetitionsText = GUILayout.TextField(_repetitionsText, _input, GUILayout.Width(80));
+            GUILayout.Label("每條件輪數", _body, GUILayout.Width(Px(110)));
+            _repetitionsText = GUILayout.TextField(_repetitionsText, _input, GUILayout.Width(Px(70)));
             if (int.TryParse(_repetitionsText, out var reps) && reps >= 1 && reps <= 20) _matrix.Repetitions = reps;
-            GUILayout.Space(24);
-            GUILayout.Label("每段筆數", _body, GUILayout.Width(90));
-            _segmentSizeText = GUILayout.TextField(_segmentSizeText, _input, GUILayout.Width(80));
-            GUILayout.FlexibleSpace();
-            if (GUILayout.Button("開啟紀錄資料夾", _big, GUILayout.Width(200))) OpenLogFolder();
+            GUILayout.Space(Px(16));
+            GUILayout.Label("每段筆數", _body, GUILayout.Width(Px(90)));
+            _segmentSizeText = GUILayout.TextField(_segmentSizeText, _input, GUILayout.Width(Px(70)));
             GUILayout.EndHorizontal();
+            GUI.enabled = true;
 
             DrawMatrixGrid();
-            DrawNextRound();
+
+            var scheduled = _matrix.Next();
+            GUILayout.Label(scheduled == null
+                ? "所有條件都已完成設定的輪數。"
+                : $"整體排程下一輪：{EntryLabels[(int)scheduled.Entry]}、{scheduled.GapMs} ms、{scheduled.TotalCount} 次（第 {scheduled.Repetition} 輪）",
+                _small);
+
+            if (GUILayout.Button("開啟紀錄資料夾", _big)) OpenLogFolder();
         }
 
         private bool CanStartRound =>
-            _session != null && _session.State == SessionState.Ready && !_session.WaitingForLateDone;
+            _round == null && _session != null && _session.State == SessionState.Ready && !_session.WaitingForLateDone;
 
         private void DrawMatrixGrid()
         {
-            GUILayout.Label("點格子可單獨跑該條件（使用目前連線的入口）。格內為 光耦／RF 已完成輪數。", _body);
+            GUILayout.Label("點格子可單獨跑該條件（用目前連線的入口）。", _small);
+            var cellWidth = GUILayout.Width(Px(150));
 
             GUILayout.BeginHorizontal();
-            GUILayout.Label("", _body, GUILayout.Width(90));
-            foreach (var count in ConditionMatrix.Counts) GUILayout.Label($"{count} 次", _title, GUILayout.Width(200));
+            GUILayout.Label("", _body, GUILayout.Width(Px(70)));
+            foreach (var count in ConditionMatrix.Counts) GUILayout.Label($"{count} 次", _title, cellWidth);
             GUILayout.EndHorizontal();
 
             foreach (var gap in ConditionMatrix.Gaps)
             {
                 GUILayout.BeginHorizontal();
-                GUILayout.Label($"{gap} ms", _title, GUILayout.Width(90));
+                GUILayout.Label($"{gap} ms", _title, GUILayout.Width(Px(70)));
                 foreach (var count in ConditionMatrix.Counts)
                 {
                     var opto = _matrix.Completed(EntryType.Opto, gap, count);
                     var rf = _matrix.Completed(EntryType.Rf, gap, count);
                     var done = opto >= _matrix.Repetitions && rf >= _matrix.Repetitions;
-                    var label = $"光耦 {opto}/{_matrix.Repetitions}　RF {rf}/{_matrix.Repetitions}" + (done ? "（完成）" : "");
+                    var label = $"光耦 {opto}/{_matrix.Repetitions}\nRF {rf}/{_matrix.Repetitions}" + (done ? "（完成）" : "");
 
                     GUI.enabled = CanStartRound;
-                    if (GUILayout.Button(label, _big, GUILayout.Width(200))) StartRound(gap, count);
+                    if (GUILayout.Button(label, _cell, cellWidth)) StartRound(gap, count);
                     GUI.enabled = true;
                 }
                 GUILayout.EndHorizontal();
             }
         }
 
+        /// <summary>左側閒置卡片的主要動作：依排程跑目前連線入口的下一輪。</summary>
         private void DrawNextRound()
         {
-            var scheduled = _matrix.Next();
-            if (scheduled == null)
-            {
-                GUILayout.Label("所有條件都已完成設定的輪數。", _title);
-                return;
-            }
-
-            GUILayout.Label(
-                $"排程建議：{EntryLabels[(int)scheduled.Entry]}、間隔 {scheduled.GapMs} ms、{scheduled.TotalCount} 次（第 {scheduled.Repetition} 輪）",
-                _body);
-
-            if (_session?.Firmware == null) return;
-
             var connected = _session.Firmware.Entry;
             var next = _matrix.NextFor(connected);
             if (next == null)
             {
-                GUILayout.Label($"{EntryLabels[(int)connected]}已完成所有條件，請換另一個入口。", _title);
+                GUILayout.Label($"{EntryLabels[(int)connected]}已完成所有條件。", _huge);
+                GUILayout.Label("請換另一個入口的板子，或在右側點格子補跑。", _body);
                 return;
             }
-            if (scheduled.Entry != connected)
+
+            GUILayout.Label($"下一輪：{EntryLabels[(int)connected]}、間隔 {next.GapMs} ms、{next.TotalCount} 次", _huge);
+            GUILayout.Label($"第 {next.Repetition} 輪。開始後會自動啟動跑步機並預熱到 1.0 km/h，跑帶上請不要站人。", _body);
+
+            var scheduled = _matrix.Next();
+            if (scheduled != null && scheduled.Entry != connected)
             {
-                GUILayout.Label($"依排程下一輪輪到{EntryLabels[(int)scheduled.Entry]}；也可以先繼續用{EntryLabels[(int)connected]}。", _body);
+                GUILayout.Label($"依整體排程下一輪輪到{EntryLabels[(int)scheduled.Entry]}；也可以先繼續用{EntryLabels[(int)connected]}。", _small);
             }
 
             GUI.enabled = CanStartRound;
-            if (GUILayout.Button(
-                    $"自動跑下一輪：{EntryLabels[(int)connected]}、{next.GapMs} ms、{next.TotalCount} 次（第 {next.Repetition} 輪）",
-                    _big))
-            {
-                StartRound(next.GapMs, next.TotalCount);
-            }
+            PrimaryButton("開始下一輪", () => StartRound(next.GapMs, next.TotalCount));
             GUI.enabled = true;
         }
 

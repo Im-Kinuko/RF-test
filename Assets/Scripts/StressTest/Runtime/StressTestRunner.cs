@@ -11,8 +11,8 @@ using UnityEngine.SceneManagement;
 namespace StressTest.Runtime
 {
     /// <summary>
-    /// 壓力測試的 OnGUI 介面。只呈現 StressTestSession 的狀態並轉發操作，不含判定邏輯。
-    /// 在名為 StressTest 的場景啟動時自動建立。
+    /// 壓力測試的 OnGUI 介面。只呈現 StressTestSession／TestRound 的狀態並轉發操作，不含判定邏輯。
+    /// 版面分三區：上方狀態列、左側「現在要做的事」、右側條件矩陣。在名為 StressTest 的場景啟動時自動建立。
     /// </summary>
     public sealed partial class StressTestRunner : MonoBehaviour
     {
@@ -26,9 +26,8 @@ namespace StressTest.Runtime
         private SerialPortLink _link;
         private StressTestSession _session;
         private string _connectError;
-        private GUIStyle _big, _title, _body, _huge, _input;
 
-        // 單段測試
+        // 手動單段
         private static readonly string[] DirectionLabels = { "加速", "減速" };
         private static readonly int[] GapOptions = { 0, 1, 5, 10 };
         private static readonly string[] GapLabels = { "0 ms", "1 ms", "5 ms", "10 ms" };
@@ -44,8 +43,8 @@ namespace StressTest.Runtime
         private SegmentCsvWriter _segmentCsv;
         private StreamWriter _segmentFile;
         private string _segmentCsvPath;
-        private Vector2 _scroll;
         private SegmentRun _progressSegment;
+        private bool _showManualTools;
 
         private static string LogFolder()
         {
@@ -67,10 +66,12 @@ namespace StressTest.Runtime
             LoadPreferences();
             RefreshPorts();
             RestoreMatrix();
+            ReadScreenshotArgument();
         }
 
         private void Update()
         {
+            UpdateScreenshot();
             if (_session == null) return;
 
             if (!_link.IsOpen)
@@ -114,9 +115,9 @@ namespace StressTest.Runtime
         {
             var portName = _portIndex >= 0 ? _ports[_portIndex] : null;
             _link = SerialPortLink.TryOpen(portName, out _connectError);
-            if (_link != null) SavePreferences();
             if (_link == null) return;
 
+            SavePreferences();
             _session = new StressTestSession(_link, _entry);
             _session.BeginHandshake(Time.realtimeSinceStartupAsDouble);
         }
@@ -133,49 +134,224 @@ namespace StressTest.Runtime
             _link = null;
         }
 
-        private void EnsureStyles()
-        {
-            if (_big != null) return;
-            _big = new GUIStyle(GUI.skin.button) { fontSize = 22, fixedHeight = 48 };
-            _title = new GUIStyle(GUI.skin.label) { fontSize = 22, fontStyle = FontStyle.Bold, wordWrap = true };
-            _body = new GUIStyle(GUI.skin.label) { fontSize = 18, wordWrap = true };
-            _huge = new GUIStyle(GUI.skin.label) { fontSize = 40, fontStyle = FontStyle.Bold };
-            _input = new GUIStyle(GUI.skin.textField) { fontSize = 32, fixedHeight = 52 };
-        }
+        // ===== 版面 =====
 
         private void OnGUI()
         {
             EnsureStyles();
-            GUILayout.BeginArea(new Rect(24, 24, Mathf.Min(800, Screen.width - 48), Screen.height - 48));
-            _scroll = GUILayout.BeginScrollView(_scroll);
+            HandleShortcuts();
 
-            DrawConnection();
-            GUILayout.Space(16);
-            DrawStatus();
-            GUILayout.Space(8);
-            DrawEmergencyStop();
-            GUILayout.Space(16);
+            var m = Px(16);
+            var w = Screen.width;
+            var h = Screen.height;
+            var top = new Rect(m, m, w - 2 * m, Px(96));
+            var bodyY = top.yMax + m;
+            var leftWidth = (w - 3 * m) * 0.56f;
+            var left = new Rect(m, bodyY, leftWidth, h - bodyY - m);
+            var right = new Rect(left.xMax + m, bodyY, w - left.xMax - 2 * m, h - bodyY - m);
 
+            Panel(top, DrawStatusBar);
+            Panel(left, () =>
+            {
+                _leftScroll = GUILayout.BeginScrollView(_leftScroll);
+                DrawCurrentTask();
+                GUILayout.EndScrollView();
+            });
+            Panel(right, () =>
+            {
+                _rightScroll = GUILayout.BeginScrollView(_rightScroll);
+                DrawMatrixPanel();
+                GUILayout.EndScrollView();
+            });
+        }
+
+        private Vector2 _leftScroll, _rightScroll;
+
+        private void Panel(Rect rect, Action draw)
+        {
+            GUI.Box(rect, GUIContent.none, _panel);
+            var pad = Px(12);
+            GUILayout.BeginArea(new Rect(rect.x + pad, rect.y + pad, rect.width - 2 * pad, rect.height - 2 * pad));
+            draw();
+            GUILayout.EndArea();
+            GUI.enabled = true;
+        }
+
+        /// <summary>空白鍵＝緊急停止，任何狀態都有效；只有輸入作廢原因時讓空白鍵打字。</summary>
+        private void HandleShortcuts()
+        {
+            var e = Event.current;
+            if (e.type == EventType.KeyDown && e.keyCode == KeyCode.Space
+                && GUI.GetNameOfFocusedControl() != VoidReasonControl)
+            {
+                EmergencyStop();
+                e.Use();
+            }
+        }
+
+        private void DrawStatusBar()
+        {
+            GetStatus(out var light, out var text);
+
+            GUILayout.BeginHorizontal();
+            var previous = GUI.color;
+            GUI.color = light;
+            GUILayout.Box(GUIContent.none, _light, GUILayout.Width(Px(36)), GUILayout.Height(Px(36)));
+            GUI.color = previous;
+
+            GUILayout.BeginVertical();
+            GUILayout.Label(text, _title);
+            if (_session?.Firmware != null)
+            {
+                var parameters = string.Join("　", _session.Firmware.Parameters.Select(kv => $"{kv.Key}={kv.Value}"));
+                GUILayout.Label($"{_ports.ElementAtOrDefault(_portIndex)}　韌體參數：{parameters}", _small);
+            }
+            GUILayout.EndVertical();
+
+            GUILayout.FlexibleSpace();
+            GUI.enabled = _session != null;
+            if (GUILayout.Button("中斷連線", _big, GUILayout.Width(Px(160)))) Disconnect();
+            GUI.enabled = true;
+            GUILayout.Space(Px(12));
+            DangerButton("緊急停止（空白鍵）", EmergencyStop, Px(320));
+            GUILayout.EndHorizontal();
+        }
+
+        private void GetStatus(out Color light, out string text)
+        {
+            if (_session == null)
+            {
+                light = Color.gray;
+                text = _connectError ?? "尚未連線";
+                return;
+            }
+
+            var entry = _session.Firmware != null ? EntryLabels[(int)_session.Firmware.Entry] : "";
+            switch (_session.State)
+            {
+                case SessionState.Handshaking:
+                    light = Color.yellow;
+                    text = "等待韌體回報身分…";
+                    break;
+                case SessionState.Ready:
+                    light = Color.green;
+                    text = $"已連線：{entry}韌體 v{_session.Firmware.Version}";
+                    break;
+                case SessionState.RunningSegment:
+                    light = Color.green;
+                    text = $"已連線：{entry}韌體，正在執行一段";
+                    break;
+                case SessionState.AwaitingReading:
+                    light = Color.green;
+                    text = $"已連線：{entry}韌體，等待輸入面板速度";
+                    break;
+                case SessionState.EntryMismatch:
+                    light = Color.red;
+                    text = $"入口不符：選了「{EntryLabels[(int)_entry]}」，板子是「{entry}」韌體";
+                    break;
+                case SessionState.HandshakeTimeout:
+                    light = Color.red;
+                    text = "逾時：4 秒內沒有收到韌體回報";
+                    break;
+                default:
+                    light = Color.gray;
+                    text = "尚未連線";
+                    break;
+            }
+        }
+
+        /// <summary>左側卡片：依目前狀態只顯示一件事，且只有一個主要按鈕。</summary>
+        private void DrawCurrentTask()
+        {
+            GUILayout.Label("現在要做的事", _small);
+            var state = _session?.State;
+
+            if (_session == null || state == SessionState.EntryMismatch || state == SessionState.HandshakeTimeout)
+            {
+                DrawConnectionCard();
+                return;
+            }
+            if (state == SessionState.Handshaking)
+            {
+                GUILayout.Label("等待韌體回報身分…", _huge);
+                GUILayout.Label("Nano 開埠時會重新開機，約需 2 秒。", _body);
+                return;
+            }
             if (_round != null)
             {
                 DrawRound();
+                return;
+            }
+            if (state == SessionState.RunningSegment || state == SessionState.AwaitingReading)
+            {
+                GUILayout.Label("手動單段", _title);
+                DrawSegment();
+                return;
+            }
+
+            DrawIdleCard();
+        }
+
+        private void DrawConnectionCard()
+        {
+            var connected = _session != null;
+
+            if (connected)
+            {
+                GUILayout.Label(_session.State == SessionState.EntryMismatch
+                    ? "請中斷連線後，改選正確的入口或換一塊板子。"
+                    : "請確認板子燒的是測試韌體、baud 為 115200，再重新連線。", _title);
+                PrimaryButton("中斷連線，重新選擇", Disconnect);
+                return;
+            }
+
+            GUILayout.Label("連線到 Arduino", _huge);
+            if (_connectError != null) GUILayout.Label(_connectError, _body);
+
+            GUILayout.Label("1. 選擇入口", _title);
+            _entry = (EntryType)GUILayout.Toolbar((int)_entry, EntryLabels, _big);
+
+            GUILayout.Label("2. 選擇 COM port", _title);
+            GUILayout.BeginHorizontal();
+            if (_ports.Length == 0)
+            {
+                GUILayout.Label("找不到任何 COM port，請確認 USB 線。", _body);
             }
             else
             {
-                DrawRoundSetup();
-                GUILayout.Space(24);
-                DrawSingleCommands();
-                GUILayout.Space(16);
-                DrawSegment();
+                _portIndex = GUILayout.Toolbar(_portIndex, _ports, _big);
             }
+            if (GUILayout.Button("重新整理", _big, GUILayout.Width(Px(140)))) RefreshPorts();
+            GUILayout.EndHorizontal();
 
-            GUILayout.EndScrollView();
-            GUILayout.EndArea();
+            GUILayout.Space(Px(12));
+            GUI.enabled = _portIndex >= 0;
+            PrimaryButton("3. 連線", Connect);
+            GUI.enabled = true;
         }
+
+        private void DrawIdleCard()
+        {
+            if (_roundMessage != null) GUILayout.Label(_roundMessage, _body);
+            DrawNextRound();
+
+            GUILayout.Space(Px(16));
+            if (GUILayout.Button(_showManualTools ? "收起手動工具" : "展開手動工具（單發、手動單段）", _big))
+            {
+                _showManualTools = !_showManualTools;
+            }
+            if (!_showManualTools) return;
+
+            DrawSingleCommands();
+            GUILayout.Space(Px(8));
+            GUILayout.Label("手動單段", _title);
+            DrawSegment();
+        }
+
+        // ===== 手動工具 =====
 
         private void DrawSegment()
         {
-            GUILayout.Label("單段測試（手動）", _title);
             var state = _session?.State;
 
             if (state == SessionState.RunningSegment)
@@ -192,7 +368,7 @@ namespace StressTest.Runtime
             var waitingForLateDone = _session != null && _session.WaitingForLateDone;
             if (waitingForLateDone)
             {
-                GUILayout.Label("上一段逾時，Arduino 可能還在執行。請等它回報完成，或按「中斷連線」後重新連線。", _body);
+                GUILayout.Label("上一段逾時，Arduino 可能還在執行。請等它回報完成，或中斷連線後重新連線。", _body);
             }
 
             GUI.enabled = state == SessionState.Ready && !waitingForLateDone;
@@ -200,11 +376,11 @@ namespace StressTest.Runtime
             _gapIndex = GUILayout.Toolbar(_gapIndex, GapLabels, _big);
 
             GUILayout.BeginHorizontal();
-            GUILayout.Label("筆數", _body, GUILayout.Width(60));
-            _countText = GUILayout.TextField(_countText, _input, GUILayout.Width(100));
-            GUILayout.Space(24);
-            GUILayout.Label("目前面板速度", _body, GUILayout.Width(130));
-            _startText = GUILayout.TextField(_startText, _input, GUILayout.Width(120));
+            GUILayout.Label("筆數", _body, GUILayout.Width(Px(60)));
+            _countText = GUILayout.TextField(_countText, _input, GUILayout.Width(Px(100)));
+            GUILayout.Space(Px(24));
+            GUILayout.Label("目前面板速度", _body, GUILayout.Width(Px(130)));
+            _startText = GUILayout.TextField(_startText, _input, GUILayout.Width(Px(120)));
             GUILayout.EndHorizontal();
 
             if (GUILayout.Button("跑一段", _big)) StartSegment();
@@ -252,7 +428,7 @@ namespace StressTest.Runtime
             var elapsed = Time.realtimeSinceStartupAsDouble - _segmentStartedAt;
 
             GUILayout.Label($"執行中：{DirectionLabels[(int)segment.Direction]} {segment.Count} 筆，間隔 {segment.GapMs} ms", _body);
-            var rect = GUILayoutUtility.GetRect(100, 24, GUILayout.ExpandWidth(true));
+            var rect = GUILayoutUtility.GetRect(100, Px(24), GUILayout.ExpandWidth(true));
             GUI.Box(rect, GUIContent.none);
             GUI.Box(new Rect(rect.x, rect.y, rect.width * Mathf.Clamp01((float)(elapsed / estimate)), rect.height), GUIContent.none);
         }
@@ -285,8 +461,8 @@ namespace StressTest.Runtime
 
             GUILayout.BeginHorizontal();
             GUI.SetNextControlName(ReadingControl);
-            _readingText = GUILayout.TextField(_readingText, _input, GUILayout.Width(200));
-            if (GUILayout.Button("確認（Enter）", _big)) submit = true;
+            _readingText = GUILayout.TextField(_readingText, _input, GUILayout.Width(Px(200)));
+            PrimaryButton("確認（Enter）", () => submit = true);
             GUILayout.EndHorizontal();
             GUI.FocusControl(ReadingControl);
 
@@ -341,95 +517,8 @@ namespace StressTest.Runtime
                 _title);
             GUILayout.Label(
                 $"Arduino 回報 {r.Segment.ReportedCount?.ToString() ?? "無"} 筆，實際間隔平均 {r.Segment.MeanGapMicros / 1000.0:F3} ms、最大 {r.Segment.MaxGapMicros / 1000.0:F3} ms",
-                _body);
-            if (_segmentCsvPath != null) GUILayout.Label("已寫入：" + _segmentCsvPath, _body);
-        }
-
-        private void DrawConnection()
-        {
-            var connected = _session != null;
-            GUI.enabled = !connected;
-
-            GUILayout.Label("1. 選擇入口", _title);
-            _entry = (EntryType)GUILayout.Toolbar((int)_entry, EntryLabels, _big);
-
-            GUILayout.Label("2. 選擇 COM port", _title);
-            GUILayout.BeginHorizontal();
-            if (_ports.Length == 0)
-            {
-                GUILayout.Label("找不到任何 COM port。", _body);
-            }
-            else
-            {
-                _portIndex = GUILayout.Toolbar(_portIndex, _ports, _big);
-            }
-            if (GUILayout.Button("重新整理", _big, GUILayout.Width(140))) RefreshPorts();
-            GUILayout.EndHorizontal();
-
-            GUI.enabled = true;
-            GUILayout.Label("3. 連線", _title);
-            if (!connected)
-            {
-                GUI.enabled = _portIndex >= 0;
-                if (GUILayout.Button("連線", _big)) Connect();
-                GUI.enabled = true;
-            }
-            else if (GUILayout.Button("中斷連線", _big))
-            {
-                Disconnect();
-            }
-        }
-
-        private void DrawStatus()
-        {
-            Color light;
-            string text;
-
-            if (_session == null)
-            {
-                light = Color.gray;
-                text = _connectError ?? "尚未連線";
-            }
-            else
-            {
-                switch (_session.State)
-                {
-                    case SessionState.Handshaking:
-                        light = Color.yellow;
-                        text = "等待韌體回報身分…";
-                        break;
-                    case SessionState.Ready:
-                        light = Color.green;
-                        text = $"已連線：{EntryLabels[(int)_session.Firmware.Entry]}韌體 v{_session.Firmware.Version}";
-                        break;
-                    case SessionState.EntryMismatch:
-                        light = Color.red;
-                        text = $"入口不符：你選了「{EntryLabels[(int)_entry]}」，但板子上是「{EntryLabels[(int)_session.Firmware.Entry]}」韌體。請中斷連線後改選入口或換板子。";
-                        break;
-                    case SessionState.HandshakeTimeout:
-                        light = Color.red;
-                        text = "逾時：4 秒內沒有收到韌體回報。請確認板子燒的是測試韌體，baud 為 115200。";
-                        break;
-                    default:
-                        light = Color.gray;
-                        text = _session.State.ToString();
-                        break;
-                }
-            }
-
-            GUILayout.BeginHorizontal();
-            var previous = GUI.color;
-            GUI.color = light;
-            GUILayout.Box(GUIContent.none, GUILayout.Width(32), GUILayout.Height(32));
-            GUI.color = previous;
-            GUILayout.Label(text, _title);
-            GUILayout.EndHorizontal();
-
-            if (_session?.Firmware != null)
-            {
-                var parameters = string.Join("　", _session.Firmware.Parameters.Select(kv => $"{kv.Key}={kv.Value}"));
-                GUILayout.Label("韌體參數：" + parameters, _body);
-            }
+                _small);
+            if (_segmentCsvPath != null) GUILayout.Label("已寫入：" + _segmentCsvPath, _small);
         }
 
         private void DrawSingleCommands()
@@ -447,11 +536,11 @@ namespace StressTest.Runtime
             GUI.enabled = true;
             if (_session?.LastError != null)
             {
-                GUILayout.Label($"韌體回報錯誤：{_session.LastError}", _body);
+                GUILayout.Label($"韌體回報錯誤：{_session.LastError}", _small);
             }
             else if (_session?.LastAck != null)
             {
-                GUILayout.Label($"韌體已執行：{_session.LastAck}", _body);
+                GUILayout.Label($"韌體已執行：{_session.LastAck}", _small);
             }
         }
     }
