@@ -9,14 +9,8 @@ namespace StressTest.Runtime
     /// <summary>完整一輪的介面：設定、逐步引導、本輪總結與三份 CSV。</summary>
     public sealed partial class StressTestRunner
     {
-        private static readonly int[] TotalCountOptions = { 40, 80, 120 };
-        private static readonly string[] TotalCountLabels = { "40 次", "80 次", "120 次" };
-
         private TestRound _round;
         private string _roundMessage;
-        private int _roundGapIndex;
-        private int _roundCountIndex;
-        private string _segmentSizeText = "20";
 
         private RoundCsvLog _roundLog;
         private StreamWriter _commandsFile, _roundSegmentsFile, _roundsFile;
@@ -26,43 +20,12 @@ namespace StressTest.Runtime
             && _round.State != RoundState.Completed
             && _round.State != RoundState.Failed;
 
-        private void DrawRoundSetup()
-        {
-            GUILayout.Label("完整一輪", _title);
-            if (_roundMessage != null) GUILayout.Label(_roundMessage, _body);
-
-            GUI.enabled = _session != null && _session.State == SessionState.Ready && !_session.WaitingForLateDone;
-
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("間隔", _body, GUILayout.Width(80));
-            _roundGapIndex = GUILayout.Toolbar(_roundGapIndex, GapLabels, _big);
-            GUILayout.EndHorizontal();
-
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("總次數", _body, GUILayout.Width(80));
-            _roundCountIndex = GUILayout.Toolbar(_roundCountIndex, TotalCountLabels, _big);
-            GUILayout.EndHorizontal();
-
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("每段筆數", _body, GUILayout.Width(80));
-            _segmentSizeText = GUILayout.TextField(_segmentSizeText, _input, GUILayout.Width(100));
-            GUILayout.EndHorizontal();
-
-            if (GUILayout.Button("開始這一輪", _big)) StartRound();
-            GUI.enabled = true;
-        }
-
-        private void StartRound()
+        private void StartRound(int gap, int total)
         {
             _roundMessage = null;
-            if (!int.TryParse(_segmentSizeText, out var segmentSize) || segmentSize < 1 || segmentSize > 32)
-            {
-                _roundMessage = "每段筆數請輸入 1～32。";
-                return;
-            }
+            if (!TryReadSegmentSize(out var segmentSize)) return;
+            SavePreferences();
 
-            var gap = GapOptions[_roundGapIndex];
-            var total = TotalCountOptions[_roundCountIndex];
             var entry = _session.Firmware.Entry == EntryType.Opto ? "OPTO" : "RF";
             var roundId = $"{DateTime.Now:yyyyMMdd-HHmmss}-{entry}-G{gap}-N{total}";
 
@@ -213,16 +176,26 @@ namespace StressTest.Runtime
 
         private void LeaveRound(string voidReason)
         {
+            FinishRound(voidReason);
+            _voidReasonText = "";
+            _round = null;
+        }
+
+        /// <summary>寫入每輪那一列並計入矩陣進度（作廢不計）。只在 Completed／Failed 時有效。</summary>
+        private void FinishRound(string voidReason)
+        {
+            if (_round == null) return;
             try
             {
-                _round.Finish(voidReason);
+                if (_round.Finish(voidReason))
+                {
+                    _matrix.Record(_session?.Firmware?.Entry ?? _entry, _round.Config.GapMs, _round.Config.TotalCount, _round.IsVoided);
+                }
             }
             catch (IOException e)
             {
                 _roundMessage = $"寫入每輪紀錄失敗：{e.Message}";
             }
-            _voidReasonText = "";
-            _round = null;
         }
 
         /// <summary>任何狀態都可用：輪次進行中交給 TestRound；手動單段則中止並送停止。</summary>

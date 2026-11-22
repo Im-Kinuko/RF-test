@@ -62,7 +62,12 @@ namespace StressTest.Runtime
             new GameObject(nameof(StressTestRunner)).AddComponent<StressTestRunner>();
         }
 
-        private void Awake() => RefreshPorts();
+        private void Awake()
+        {
+            LoadPreferences();
+            RefreshPorts();
+            RestoreMatrix();
+        }
 
         private void Update()
         {
@@ -98,7 +103,7 @@ namespace StressTest.Runtime
 
         private void RefreshPorts()
         {
-            var previous = _portIndex >= 0 && _portIndex < _ports.Length ? _ports[_portIndex] : null;
+            var previous = _portIndex >= 0 && _portIndex < _ports.Length ? _ports[_portIndex] : _preferredPort;
             _ports = SerialPort.GetPortNames();
             Array.Sort(_ports);
             _portIndex = previous != null ? Array.IndexOf(_ports, previous) : -1;
@@ -109,6 +114,7 @@ namespace StressTest.Runtime
         {
             var portName = _portIndex >= 0 ? _ports[_portIndex] : null;
             _link = SerialPortLink.TryOpen(portName, out _connectError);
+            if (_link != null) SavePreferences();
             if (_link == null) return;
 
             _session = new StressTestSession(_link, _entry);
@@ -119,7 +125,7 @@ namespace StressTest.Runtime
         {
             if (RoundIsActive) _roundMessage = "連線中斷，本輪未完成。已確認的段已寫入紀錄。";
             // 停在總結畫面時中斷或關閉：先補寫每輪那一列（Finish 只在 Completed／Failed 時有效）
-            try { _round?.Finish(); } catch (IOException) { }
+            FinishRound(null);
             _round = null;
             _manualStopPending = false;
             _session = null;
