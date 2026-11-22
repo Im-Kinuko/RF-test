@@ -78,6 +78,7 @@ namespace StressTest.Runtime
             var now = Time.realtimeSinceStartupAsDouble;
             if (RoundIsActive) _round.Tick(now);
             else _session.Poll(now);
+            FlushManualStop();
 
             // 新的一段開始時記下時間，給進度條估算用
             if (_session.CurrentSegment != _progressSegment)
@@ -117,7 +118,10 @@ namespace StressTest.Runtime
         private void Disconnect()
         {
             if (RoundIsActive) _roundMessage = "連線中斷，本輪未完成。已確認的段已寫入紀錄。";
+            // 停在總結畫面時中斷或關閉：先補寫每輪那一列（Finish 只在 Completed／Failed 時有效）
+            try { _round?.Finish(); } catch (IOException) { }
             _round = null;
+            _manualStopPending = false;
             _session = null;
             _link?.Dispose();
             _link = null;
@@ -142,6 +146,8 @@ namespace StressTest.Runtime
             DrawConnection();
             GUILayout.Space(16);
             DrawStatus();
+            GUILayout.Space(8);
+            DrawEmergencyStop();
             GUILayout.Space(16);
 
             if (_round != null)

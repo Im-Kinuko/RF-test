@@ -113,13 +113,95 @@ namespace StressTest.Core
                     }
                     break;
 
+                case RoundState.Aborting:
+                    if (_session.State != SessionState.RunningSegment && !_session.WaitingForLateDone)
+                    {
+                        _session.DiscardSegment();
+                        BeginStop(now);
+                    }
+                    else if (now > _abortDeadline)
+                    {
+                        Fail("Arduino 沒有回應中止指令。請立即按跑步機上的停止鍵。");
+                    }
+                    break;
+
                 case RoundState.Stopping:
                     // 停止指令已 ACK
                     Summary = new RoundSummary(_results, WarmupReading);
-                    _log?.WriteRound(RoundId, Config, _session.Firmware, Summary, "completed");
                     State = RoundState.Completed;
                     break;
             }
+        }
+
+        /// <summary>等待韌體回 ABORTED 的上限。光耦一筆 120 ms、RF 一筆約 340 ms，2 秒足夠。</summary>
+        public const double AbortWaitSeconds = 2.0;
+        private double _abortDeadline;
+
+        /// <summary>本輪是否作廢（緊急停止或研究人員手動作廢）。</summary>
+        public bool IsVoided { get; private set; }
+        public string VoidReason { get; private set; }
+
+        /// <summary>
+        /// 緊急停止：段執行中先送 ABORT 等韌體中止，再送停止；其他狀態直接送停止。本輪標記作廢。
+        /// 尚未開始或已結束時不做事。
+        /// </summary>
+        public void EmergencyStop(double now)
+        {
+            if (State == RoundState.Idle || State == RoundState.Completed || State == RoundState.Failed
+                || State == RoundState.Aborting)
+            {
+                return;
+            }
+
+            IsVoided = true;
+            VoidReason = "緊急停止";
+            if (State == RoundState.Stopping) return; // 停止指令已送出
+
+            PendingResult = null;
+            if (_session.Abort())
+            {
+                _abortDeadline = now + AbortWaitSeconds;
+                State = RoundState.Aborting;
+                return;
+            }
+
+            _session.DiscardSegment();
+            BeginStop(now);
+        }
+
+        /// <summary>每輪 CSV 的那一列是否已寫入。</summary>
+        public bool IsFinished { get; private set; }
+
+        /// <summary>
+        /// 研究人員離開總結畫面時呼叫，寫入每輪 CSV 的一列。
+        /// voidReason 不為 null 時手動作廢；緊急停止或失敗的輪次一律記為作廢。
+        /// 只在 Completed 或 Failed 時有效，且只寫一次。
+        /// </summary>
+        public bool Finish(string voidReason = null)
+        {
+            if (IsFinished || (State != RoundState.Completed && State != RoundState.Failed)) return false;
+
+            if (voidReason != null)
+            {
+                IsVoided = true;
+                VoidReason = voidReason;
+            }
+            else if (State == RoundState.Failed && !IsVoided)
+            {
+                IsVoided = true;
+                VoidReason = FailureReason;
+            }
+
+            Summary = Summary ?? new RoundSummary(_results, WarmupReading);
+            _log?.WriteRound(RoundId, Config, _session.Firmware, Summary, IsVoided ? "voided" : "completed", VoidReason);
+            IsFinished = true;
+            return true;
+        }
+
+        private void BeginStop(double now)
+        {
+            State = RoundState.Stopping;
+            SendSingle(SingleCommand.Stop, now);
         }
 
         /// <summary>本輪總結；完成前為 null。</summary>
@@ -198,8 +280,7 @@ namespace StressTest.Core
                     }
                     else
                     {
-                        State = RoundState.Stopping;
-                        SendSingle(SingleCommand.Stop, now);
+                        BeginStop(now);
                     }
                     break;
             }
@@ -277,7 +358,8 @@ namespace StressTest.Core
                 return;
             }
             _awaitingAck = true;
-            _expectedAckCount = _session.SingleAckCount + 1;
+            // 前一個單發還沒 ACK 時（例如啟動中按緊急停止），兩個 ACK 都要收到
+            _expectedAckCount = (_awaitingAck ? _expectedAckCount : _session.SingleAckCount) + 1;
             _singleSentAt = now;
         }
 

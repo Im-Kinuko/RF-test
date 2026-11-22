@@ -16,6 +16,8 @@ namespace StressTest.Core
         ConfirmingSegmentReading,
         /// <summary>上一段逾時，等韌體交出遲到的 DONE 才開始下一段。</summary>
         WaitingForLateDone,
+        /// <summary>緊急停止：已送 ABORT，等韌體回 ABORTED 再送停止。</summary>
+        Aborting,
         Stopping,
         Completed,
         Failed

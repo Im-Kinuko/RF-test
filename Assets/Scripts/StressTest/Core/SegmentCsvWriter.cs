@@ -69,5 +69,9 @@ namespace StressTest.Core
         public static string Speed(double v) => v.ToString("F1", CultureInfo.InvariantCulture);
         public static string Speed(double? v) => v.HasValue ? Speed(v.Value) : "";
         public static string Flag(bool b) => b ? "1" : "0";
+
+        /// <summary>研究人員輸入的文字：半形逗號換成全形、換行換成空白，避免破壞 CSV 欄位。</summary>
+        public static string FreeText(string text) =>
+            (text ?? "").Replace(',', '，').Replace('\r', ' ').Replace('\n', ' ').Trim();
     }
 }

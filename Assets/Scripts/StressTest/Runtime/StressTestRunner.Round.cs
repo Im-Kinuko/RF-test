@@ -98,6 +98,7 @@ namespace StressTest.Runtime
 
         private void CloseRoundFiles()
         {
+
             _commandsFile?.Dispose();
             _roundSegmentsFile?.Dispose();
             _roundsFile?.Dispose();
@@ -164,22 +165,115 @@ namespace StressTest.Runtime
                     GUILayout.Label("上一段逾時，等 Arduino 回報完成後自動開始下一段…", _title);
                     break;
 
+                case RoundState.Aborting:
+                    GUILayout.Label("緊急停止：等 Arduino 中止…", _huge);
+                    GUILayout.Label($"{TestRound.AbortWaitSeconds:0} 秒內沒有回應時，請直接按跑步機上的停止鍵。", _body);
+                    break;
+
                 case RoundState.Stopping:
                     GUILayout.Label("送出停止中…", _huge);
                     break;
 
                 case RoundState.Completed:
+                    if (r.IsVoided) GUILayout.Label($"本輪已作廢：{r.VoidReason}", _title);
                     DrawRoundSummary(r.Summary);
                     GUILayout.Label("請確認跑帶已完全停止，再開始下一輪。", _title);
-                    if (GUILayout.Button("跑帶已停止，回到設定", _big)) _round = null;
+                    DrawFinishButtons(r, "跑帶已停止，回到設定");
                     break;
 
                 case RoundState.Failed:
                     GUILayout.Label("本輪中斷：" + r.FailureReason, _title);
-                    GUILayout.Label("已確認的段已寫入紀錄。請確認跑步機狀態後重新開始。", _body);
-                    if (GUILayout.Button("回到設定", _big)) _round = null;
+                    GUILayout.Label("已確認的段已寫入紀錄，本輪會記為作廢。請確認跑步機狀態後重新開始。", _body);
+                    DrawFinishButtons(r, "回到設定");
                     break;
             }
+        }
+
+        private string _voidReasonText = "";
+        private const string VoidReasonControl = "VoidReason";
+
+        /// <summary>總結畫面的出口：寫入每輪 CSV 後回到設定；可選擇填原因作廢。</summary>
+        private void DrawFinishButtons(TestRound r, string leaveLabel)
+        {
+            if (r.State == RoundState.Completed && !r.IsVoided)
+            {
+                GUILayout.BeginHorizontal();
+                GUILayout.Label("作廢原因", _body, GUILayout.Width(90));
+                GUI.SetNextControlName(VoidReasonControl);
+                _voidReasonText = GUILayout.TextField(_voidReasonText, _input);
+                GUI.enabled = _voidReasonText.Trim().Length > 0;
+                if (GUILayout.Button("作廢此輪", _big, GUILayout.Width(160))) LeaveRound(_voidReasonText.Trim());
+                GUI.enabled = true;
+                GUILayout.EndHorizontal();
+                GUILayout.Label("作廢的輪次原始資料保留，但不計入條件進度。", _body);
+            }
+
+            if (GUILayout.Button(leaveLabel, _big)) LeaveRound(null);
+        }
+
+        private void LeaveRound(string voidReason)
+        {
+            try
+            {
+                _round.Finish(voidReason);
+            }
+            catch (IOException e)
+            {
+                _roundMessage = $"寫入每輪紀錄失敗：{e.Message}";
+            }
+            _voidReasonText = "";
+            _round = null;
+        }
+
+        /// <summary>任何狀態都可用：輪次進行中交給 TestRound；手動單段則中止並送停止。</summary>
+        private void EmergencyStop()
+        {
+            var now = Time.realtimeSinceStartupAsDouble;
+            if (RoundIsActive)
+            {
+                _round.EmergencyStop(now);
+                return;
+            }
+            if (_session == null) return;
+
+            if (_session.Abort())
+            {
+                _manualStopPending = true; // 等 ABORTED 回到 Ready 後送停止（見 Update）
+                return;
+            }
+            _session.DiscardSegment();
+            _session.SendSingle(SingleCommand.Stop);
+        }
+
+        private bool _manualStopPending;
+
+        /// <summary>手動單段被中止後，回到 Ready 就補送停止。由 Update 呼叫。</summary>
+        private void FlushManualStop()
+        {
+            if (!_manualStopPending || _session == null || _session.State == SessionState.RunningSegment) return;
+            _manualStopPending = false;
+            _session.DiscardSegment();
+            _session.SendSingle(SingleCommand.Stop);
+        }
+
+        private void DrawEmergencyStop()
+        {
+            var e = Event.current;
+            // 作廢原因欄位要能輸入空白，聚焦在那裡時不攔截空白鍵
+            if (e.type == EventType.KeyDown && e.keyCode == KeyCode.Space
+                && GUI.GetNameOfFocusedControl() != VoidReasonControl)
+            {
+                EmergencyStop();
+                e.Use();
+            }
+
+            var previous = GUI.backgroundColor;
+            GUI.backgroundColor = Color.red;
+            var style = new GUIStyle(_big) { fontSize = 26, fontStyle = FontStyle.Bold, fixedHeight = 60 };
+            GUI.enabled = _session != null;
+            if (GUILayout.Button("緊急停止（空白鍵）", style)) EmergencyStop();
+            GUI.enabled = true;
+            GUI.backgroundColor = previous;
         }
 
         private void DrawConfirmKeys(string confirmLabel)

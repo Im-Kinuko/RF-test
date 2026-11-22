@@ -16,7 +16,7 @@ namespace StressTest.Core
 
         public const string RoundsHeader =
             "recorded_at,round_id,entry,firmware_version,firmware_params,gap_ms,total_count,segment_size,segments," +
-            "total_sent,total_drops,warmup_reading,end_reading,any_possibly_clamped,any_report_short,mean_gap_us,max_gap_us,status";
+            "total_sent,total_drops,warmup_reading,end_reading,any_possibly_clamped,any_report_short,mean_gap_us,max_gap_us,status,void_reason";
 
         private readonly TextWriter _commands;
         private readonly SegmentCsvWriter _segments;
@@ -69,7 +69,8 @@ namespace StressTest.Core
             _segments.Write(result, firmware.Entry, firmware.Version, _clock(), roundId, segmentIndex);
         }
 
-        public void WriteRound(string roundId, RoundConfig config, FirmwareInfo firmware, RoundSummary summary, string status)
+        public void WriteRound(string roundId, RoundConfig config, FirmwareInfo firmware, RoundSummary summary, string status,
+            string voidReason = null)
         {
             var c = CultureInfo.InvariantCulture;
             var parameters = string.Join(";", firmware.Parameters.Select(kv => $"{kv.Key}={kv.Value}"));
@@ -92,7 +93,8 @@ namespace StressTest.Core
                 CsvFormat.Flag(summary.AnyReportShort),
                 summary.MeanGapMicros.ToString("F1", c),
                 summary.MaxGapMicros.ToString(c),
-                status));
+                status,
+                CsvFormat.FreeText(voidReason)));
             _rounds.Flush();
         }
     }

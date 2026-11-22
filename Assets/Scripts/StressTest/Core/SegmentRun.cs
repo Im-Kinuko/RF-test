@@ -52,6 +52,9 @@ namespace StressTest.Core
         /// <summary>DONE 行回報的實際輸出筆數；尚未收到 DONE 時為 null。</summary>
         public int? ReportedCount { get; internal set; }
 
+        /// <summary>被 ABORT 中止；ReportedCount 為中止前已送出的筆數。</summary>
+        public bool Aborted { get; internal set; }
+
         /// <summary>在期限內沒有收到 DONE。</summary>
         public bool TimedOut { get; internal set; }
 

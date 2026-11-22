@@ -88,6 +88,23 @@ namespace StressTest.Core
             return new SegmentResult(CurrentSegment, panelSpeed);
         }
 
+        /// <summary>
+        /// 要求韌體立即中止執行中的段；韌體回 ABORTED 後回到 Ready。
+        /// 逾時後仍在等遲到 DONE 的段也會中止（韌體可能還在跑）。都不是時回傳 false。
+        /// </summary>
+        public bool Abort()
+        {
+            if (State != SessionState.RunningSegment && !WaitingForLateDone) return false;
+            _link.WriteLine("ABORT");
+            return true;
+        }
+
+        /// <summary>放棄等待輸入的這一段（緊急停止時用），回到 Ready。</summary>
+        public void DiscardSegment()
+        {
+            if (State == SessionState.AwaitingReading) State = SessionState.Ready;
+        }
+
         public void Poll(double now)
         {
             while (_link.TryReadLine(out var line))
@@ -126,10 +143,10 @@ namespace StressTest.Core
         private void HandleLine(string line)
         {
             var fields = line.Split(',');
-            if (WaitingForLateDone && (fields[0] == "T" || fields[0] == "DONE"))
+            if (WaitingForLateDone && (fields[0] == "T" || fields[0] == "DONE" || fields[0] == "ABORTED"))
             {
-                // 逾時那一段的遲到回報：丟棄，DONE 代表韌體已回到待命
-                if (fields[0] == "DONE") WaitingForLateDone = false;
+                // 逾時那一段的遲到回報：丟棄，DONE／ABORTED 代表韌體已回到待命
+                if (fields[0] != "T") WaitingForLateDone = false;
                 return;
             }
             if (State == SessionState.RunningSegment)
@@ -146,6 +163,13 @@ namespace StressTest.Core
                 {
                     CurrentSegment.ReportedCount = sent;
                     State = SessionState.AwaitingReading;
+                    return;
+                }
+                if (fields[0] == "ABORTED" && fields.Length == 2 && int.TryParse(fields[1], out var sentBeforeAbort))
+                {
+                    CurrentSegment.ReportedCount = sentBeforeAbort;
+                    CurrentSegment.Aborted = true;
+                    State = SessionState.Ready;
                     return;
                 }
             }

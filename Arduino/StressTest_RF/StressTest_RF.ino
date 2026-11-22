@@ -6,12 +6,14 @@
  *   Unity -> Arduino
  *     HELLO                        要求回報身分
  *     ONE,<START|UP|DOWN|STOP>     單發一次 RF 指令
+ *     ABORT                        中止執行中的 RUN（不在執行時回 ABORTED,0）
  *     RUN,<UP|DOWN>,<n>,<gap_ms>   連續發送 n 次；每次動作完成後休息 gap_ms
  *   Arduino -> Unity
  *     READY,RF,<版本>,<參數>       開機或回應 HELLO
  *     ACK,<原指令>                 已接受（ONE 在執行後、RUN 在開始前回覆）
  *     T,<i>,<start_us>,<end_us>    RUN 第 i 筆的開始／結束時間（整段結束後才送）
  *     DONE,<n_sent>                RUN 完成
+ *     ABORTED,<n_sent>             RUN 被中止；n_sent 為中止前已完成的筆數
  *     ERR,<原因>                   格式錯誤、不支援或忙碌中
  *
  * 單筆動作沿用正式版 RfSender：24 bit 代碼、重送 2 次，送出後保留 250 ms 釋放時間。
@@ -21,7 +23,7 @@
 
 #include <RCSwitch.h>
 
-const char FIRMWARE_VERSION[] = "0.2.0";
+const char FIRMWARE_VERSION[] = "0.3.0";
 const unsigned long BAUD_RATE = 115200;
 
 // ===== RF 發射 =====
@@ -79,12 +81,28 @@ unsigned long codeForCommand(const char* name) {
   return 0;
 }
 
-// RUN 期間只計算收到幾行指令，不執行
+// RUN 期間收到的指令行：ABORT 立即中止；其他只計數，段結束後回 ERR,BUSY
 int busyLines = 0;
+char busyBuffer[8];
+int busyLength = 0;
+bool busyOverflow = false;
+bool abortRequested = false;
 
 void drainSerialWhileBusy() {
   while (Serial.available() > 0) {
-    if (Serial.read() == '\n') busyLines++;
+    char c = Serial.read();
+    if (c == '\r') continue;
+    if (c == '\n') {
+      busyBuffer[busyLength] = '\0';
+      if (!busyOverflow && strcmp(busyBuffer, "ABORT") == 0) abortRequested = true;
+      else busyLines++;
+      busyLength = 0;
+      busyOverflow = false;
+    } else if (busyLength < (int)sizeof(busyBuffer) - 1) {
+      busyBuffer[busyLength++] = c;
+    } else {
+      busyOverflow = true;
+    }
   }
 }
 
@@ -113,20 +131,28 @@ bool parseRun(char* args, unsigned long* code, int* count, unsigned long* gapMs)
 void runSegment(unsigned long code, int count, unsigned long gapMs) {
   unsigned long gapUs = gapMs * 1000UL;
 
+  abortRequested = false;
+  busyLength = 0;
+  busyOverflow = false;
+  int sent = 0;
+
   for (int i = 0; i < count; i++) {
+    drainSerialWhileBusy();
+    if (abortRequested) break;  // 一筆動作完成後才檢查，不會切斷進行中的按壓／發射
+
     runStart[i] = micros();
     transmit(code);
     runEnd[i] = micros();
+    sent = i + 1;
 
     if (i < count - 1) {
-      while (micros() - runEnd[i] < gapUs) {
+      while (!abortRequested && micros() - runEnd[i] < gapUs) {
         drainSerialWhileBusy();
       }
     }
-    drainSerialWhileBusy();
   }
 
-  for (int i = 0; i < count; i++) {
+  for (int i = 0; i < sent; i++) {
     Serial.print(F("T,"));
     Serial.print(i);
     Serial.print(',');
@@ -134,8 +160,13 @@ void runSegment(unsigned long code, int count, unsigned long gapMs) {
     Serial.print(',');
     Serial.println(runEnd[i]);
   }
-  Serial.print(F("DONE,"));
-  Serial.println(count);
+  if (abortRequested) {
+    Serial.print(F("ABORTED,"));
+    Serial.println(sent);
+  } else {
+    Serial.print(F("DONE,"));
+    Serial.println(sent);
+  }
 
   // RUN 期間收到的指令一律不執行
   for (; busyLines > 0; busyLines--) {
@@ -148,6 +179,12 @@ void runSegment(unsigned long code, int count, unsigned long gapMs) {
 void handleLine(char* line) {
   if (strcmp(line, "HELLO") == 0) {
     sendReady();
+    return;
+  }
+
+  if (strcmp(line, "ABORT") == 0) {
+    // 沒有在執行 RUN：沒有東西可中止
+    Serial.println(F("ABORTED,0"));
     return;
   }
 

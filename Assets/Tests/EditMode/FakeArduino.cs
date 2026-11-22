@@ -37,6 +37,12 @@ namespace StressTest.Tests
 
         private const long MicrosRange = 1L << 32;
 
+        /// <summary>false 時收到 ABORT 不回應（模擬韌體卡死）。</summary>
+        public bool RespondToAbort { get; set; } = true;
+        /// <summary>卡住的 RUN 被中止時回報已送出的筆數。</summary>
+        public int AbortReportCount { get; set; } = 3;
+        private bool _hanging;
+
         public List<string> Received { get; } = new List<string>();
         public bool IsOpen { get; set; } = true;
 
@@ -56,6 +62,12 @@ namespace StressTest.Tests
             {
                 Run(line);
             }
+            else if (line == "ABORT")
+            {
+                if (!RespondToAbort) return;
+                Emit(_hanging ? $"ABORTED,{AbortReportCount}" : "ABORTED,0");
+                _hanging = false;
+            }
             else
             {
                 Emit("ERR,UNKNOWN");
@@ -69,7 +81,11 @@ namespace StressTest.Tests
             var gapMs = int.Parse(fields[3]);
 
             Emit("ACK," + line);
-            if (HangOnRun) return;
+            if (HangOnRun)
+            {
+                _hanging = true;
+                return;
+            }
 
             var sent = ReportOnly ?? count;
             var t = StartMicros;
