@@ -283,7 +283,7 @@ namespace StressTest.Runtime
                 $"Arduino 回報 {result.Segment.ReportedCount?.ToString() ?? "無"} 筆",
                 _body);
             if (result.PossiblyClamped)
-                GUILayout.Label("可能觸底／觸頂：理論終點超出 0.1～12.0，這段的掉包數不可信。", _title);
+                GUILayout.Label("可能觸底／觸頂：理論終點超出 1.0～12.0，這段的掉包數不可信。", _title);
             if (result.Segment.ReportShort)
                 GUILayout.Label("Arduino 回報不足：可能是序列埠或韌體問題，不一定是跑步機掉包。", _title);
         }

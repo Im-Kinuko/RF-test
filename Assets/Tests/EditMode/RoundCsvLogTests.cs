@@ -29,8 +29,8 @@ namespace StressTest.Tests
             var h = new RoundHarness(gapMs: 5, totalCount: 40,
                 arduino: new FakeArduino { GapJitterMicros = 8 }, log: outputs.CreateLog());
             h.StartAndWarmUp();
-            h.CompleteSegment(2.7);
-            h.CompleteSegment(0.7);
+            h.CompleteSegment(3.0); // 第一段全收到
+            h.CompleteSegment(1.3); // 第二段漏 3 筆
             h.AdvanceUntil(RoundState.Completed, maxSeconds: 1);
             h.Round.Finish();
             return outputs;
@@ -54,8 +54,8 @@ namespace StressTest.Tests
             var lines = Outputs.Lines(RunFortyRound().Segments);
 
             Assert.That(lines.Length, Is.EqualTo(1 + 2));
-            Assert.That(lines[1], Does.StartWith("2026-11-22 09:30:00,R1,0,OPTO,0.1.0,UP,20,5,1.0,3.0,2.7,"));
-            Assert.That(lines[2], Does.StartWith("2026-11-22 09:30:00,R1,1,OPTO,0.1.0,DOWN,20,5,2.7,0.7,0.7,"));
+            Assert.That(lines[1], Does.StartWith("2026-11-22 09:30:00,R1,0,OPTO,0.1.0,UP,20,5,1.0,3.0,3.0,"));
+            Assert.That(lines[2], Does.StartWith("2026-11-22 09:30:00,R1,1,OPTO,0.1.0,DOWN,20,5,3.0,1.0,1.3,"));
         }
 
         [Test]
@@ -69,7 +69,7 @@ namespace StressTest.Tests
                 "up_planned,down_planned,up_sent,down_sent,warmup_up,warmup_down,status,void_reason"));
             Assert.That(lines.Skip(1), Is.EqualTo(new[]
             {
-                "2026-11-22 09:30:00,R1,OPTO,0.1.0,press_ms=120;action_ms=120,5,40,20,2,40,3,1.0,0.7,0,0,5008.0,5008,20,20,20,20,0,0,completed,"
+                "2026-11-22 09:30:00,R1,OPTO,0.1.0,press_ms=120;action_ms=120,5,40,20,2,40,3,1.0,1.3,0,0,5008.0,5008,20,20,20,20,0,0,completed,"
             }));
         }
 

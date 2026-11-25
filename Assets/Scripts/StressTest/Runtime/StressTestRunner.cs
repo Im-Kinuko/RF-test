@@ -35,7 +35,7 @@ namespace StressTest.Runtime
         private SegmentDirection _direction = SegmentDirection.Up;
         private int _gapIndex;
         private string _countText = "20";
-        private string _startText = "1.0";
+        private string _startText = "2.0";
         private string _readingText = "";
         private string _inputError;
         private double _segmentStartedAt;
@@ -400,7 +400,7 @@ namespace StressTest.Runtime
             }
             if (!PanelSpeedInput.TryParse(_startText, out var startSpeed))
             {
-                _inputError = "目前面板速度請輸入 0.1～12.0。";
+                _inputError = "目前面板速度請輸入 1.0～12.0。";
                 return;
             }
 
@@ -475,7 +475,7 @@ namespace StressTest.Runtime
                 }
                 else
                 {
-                    _inputError = "請輸入 0.1～12.0 的面板速度，例如 2.7 或 27。";
+                    _inputError = "請輸入 1.0～12.0 的面板速度，例如 2.7 或 27。";
                 }
             }
 

@@ -149,13 +149,13 @@ namespace StressTest.Runtime
 
             GUILayout.Label($"下一輪：{EntryLabels[(int)connected]}、間隔 {next.GapMs} ms、{next.TotalCount} 次", _huge);
             var plan = int.TryParse(_segmentSizeText, out var size) && size >= 1 && size <= 32
-                ? RoundPlan.Create(next.TotalCount, size, 1.0)
+                ? RoundPlan.Create(next.TotalCount, size, new RoundConfig(next.GapMs, next.TotalCount).BaseSpeed)
                 : null;
             if (plan != null)
             {
                 GUILayout.Label($"加速 {plan.UpCount} 次、減速 {plan.DownCount} 次，分 {plan.Segments.Count} 段（每段 {size} 筆）", _title);
             }
-            GUILayout.Label($"第 {next.Repetition} 輪。開始後會自動啟動跑步機（開機 1.0 km/h），確認面板後開始計分。跑帶上請不要站人。", _body);
+            GUILayout.Label($"第 {next.Repetition} 輪。開始後會自動啟動跑步機（開機 1.0 km/h），預熱加速 10 次到 2.0 後開始計分（2.0↔4.0）。跑帶上請不要站人。", _body);
 
             var scheduled = _matrix.Next();
             if (scheduled != null && scheduled.Entry != connected)

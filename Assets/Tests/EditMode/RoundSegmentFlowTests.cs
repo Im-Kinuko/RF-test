@@ -83,14 +83,37 @@ namespace StressTest.Tests
         }
 
         [Test]
+        public void DownSegmentEndingBelowTreadmillMinimum_IsFlaggedPossiblyClamped()
+        {
+            // 最低速度 1.0：第一段漏 3 筆停在 2.7，第二段減 2.0 理論終點 0.7，會撞到底
+            var h = new RoundHarness(gapMs: 1, totalCount: 40);
+            h.StartAndWarmUp();
+            h.CompleteSegment(2.7);
+
+            var second = h.CompleteSegment(1.0);
+
+            Assert.That(second.PossiblyClamped, Is.True);
+        }
+
+        [Test]
+        public void DownSegmentEndingExactlyAtMinimum_IsNotClamped()
+        {
+            var h = new RoundHarness(gapMs: 1, totalCount: 40);
+            h.StartAndWarmUp();
+            h.CompleteSegment(3.0);
+
+            Assert.That(h.CompleteSegment(1.0).PossiblyClamped, Is.False);
+        }
+
+        [Test]
         public void ExpectedEndOutsidePanelRange_IsFlaggedPossiblyClamped()
         {
             var h = new RoundHarness(gapMs: 1, totalCount: 40);
             h.StartAndWarmUp();
             h.CompleteSegment(1.5); // 第一段只上升 0.5
 
-            // 第二段從 1.5 減 2.0，理論終點 -0.5，低於 0.1
-            var second = h.CompleteSegment(0.1);
+            // 第二段從 1.5 減 2.0，理論終點 -0.5，低於最低速度 1.0
+            var second = h.CompleteSegment(1.0);
 
             Assert.That(h.Round.Results[0].PossiblyClamped, Is.False);
             Assert.That(second.PossiblyClamped, Is.True);

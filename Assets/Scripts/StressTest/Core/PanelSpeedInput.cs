@@ -5,12 +5,13 @@ namespace StressTest.Core
     /// <summary>解析研究人員輸入的跑步機面板速度（km/h）。</summary>
     public static class PanelSpeedInput
     {
-        public const double Min = 0.1;
+        /// <summary>跑步機（XTERRA DT168）的最低速度，也是開機速度。觸底判斷也以此為準。</summary>
+        public const double Min = 1.0;
         public const double Max = 12.0;
 
         /// <summary>
         /// 接受「1」「1.0」；沒有小數點且 ≥ 10 的整數視為照面板數字直接輸入，自動除以 10（「27」→ 2.7）。
-        /// 超出 0.1～12.0 的值一律拒絕。
+        /// 超出 1.0～12.0 的值一律拒絕。
         /// </summary>
         public static bool TryParse(string text, out double speed)
         {

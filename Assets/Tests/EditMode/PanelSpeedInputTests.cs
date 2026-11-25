@@ -10,7 +10,7 @@ namespace StressTest.Tests
         [TestCase("10", 1.0)]   // 面板沒有小數點時直接照打
         [TestCase("27", 2.7)]
         [TestCase(" 2.7 ", 2.7)]
-        [TestCase("0.1", 0.1)]
+        [TestCase("12", 1.2)]
         [TestCase("12.0", 12.0)]
         public void Accepts(string text, double expected)
         {
@@ -21,6 +21,8 @@ namespace StressTest.Tests
         [TestCase("")]
         [TestCase("abc")]
         [TestCase("0")]
+        [TestCase("0.9")]   // 跑步機最低 1.0 km/h
+        [TestCase("0.5")]
         [TestCase("-1")]
         [TestCase("12.5")]
         [TestCase("130")]
