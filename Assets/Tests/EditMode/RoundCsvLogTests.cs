@@ -65,10 +65,11 @@ namespace StressTest.Tests
 
             Assert.That(lines[0], Is.EqualTo(
                 "recorded_at,round_id,entry,firmware_version,firmware_params,gap_ms,total_count,segment_size,segments," +
-                "total_sent,total_drops,warmup_reading,end_reading,any_possibly_clamped,any_report_short,mean_gap_us,max_gap_us,status,void_reason"));
+                "total_sent,total_drops,warmup_reading,end_reading,any_possibly_clamped,any_report_short,mean_gap_us,max_gap_us," +
+                "up_planned,down_planned,up_sent,down_sent,warmup_up,warmup_down,status,void_reason"));
             Assert.That(lines.Skip(1), Is.EqualTo(new[]
             {
-                "2026-11-22 09:30:00,R1,OPTO,0.1.0,press_ms=120;action_ms=120,5,40,20,2,40,3,1.0,0.7,0,0,5008.0,5008,completed,"
+                "2026-11-22 09:30:00,R1,OPTO,0.1.0,press_ms=120;action_ms=120,5,40,20,2,40,3,1.0,0.7,0,0,5008.0,5008,20,20,20,20,0,0,completed,"
             }));
         }
 

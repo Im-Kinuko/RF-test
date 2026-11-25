@@ -50,6 +50,16 @@ namespace StressTest.Core
         /// <summary>預熱已送出的加速次數與應送次數。</summary>
         public int WarmupSent => _warmupSent;
 
+        /// <summary>預熱與重新預熱累計送出的單發加速／減速次數（不計分）。</summary>
+        public int WarmupUpSent { get; private set; }
+        public int WarmupDownSent { get; private set; }
+
+        /// <summary>已確認的計分段中，Arduino 回報實際送出的加速／減速次數。</summary>
+        public int UpSent => RoundSummary.SentCount(_results, SegmentDirection.Up);
+        public int DownSent => RoundSummary.SentCount(_results, SegmentDirection.Down);
+
+        private RoundSummary NewSummary() => new RoundSummary(_results, WarmupReading, Plan, WarmupUpSent, WarmupDownSent);
+
         /// <summary>目前要研究人員核對的面板速度。</summary>
         public double ExpectedPanelSpeed { get; private set; }
 
@@ -127,7 +137,7 @@ namespace StressTest.Core
 
                 case RoundState.Stopping:
                     // 停止指令已 ACK
-                    Summary = new RoundSummary(_results, WarmupReading);
+                    Summary = NewSummary();
                     State = RoundState.Completed;
                     break;
             }
@@ -192,7 +202,7 @@ namespace StressTest.Core
                 VoidReason = FailureReason;
             }
 
-            Summary = Summary ?? new RoundSummary(_results, WarmupReading);
+            Summary = Summary ?? NewSummary();
             _log?.WriteRound(RoundId, Config, _session.Firmware, Summary, IsVoided ? "voided" : "completed", VoidReason);
             IsFinished = true;
             return true;
@@ -333,7 +343,11 @@ namespace StressTest.Core
             _nextWarmupAt += Config.WarmupIntervalSeconds;
             _warmupSent++;
             SendSingle(_warmupDirection, now);
+            // 收到 ACK 才計入預熱次數，被拒絕或沒回應的按壓不算
+            if (_awaitingAck) _pendingWarmupPress = _warmupDirection;
         }
+
+        private SingleCommand? _pendingWarmupPress;
 
         private void StartSegment(int index, double startSpeed, double now)
         {
@@ -372,6 +386,9 @@ namespace StressTest.Core
             {
                 _awaitingAck = false;
                 _lastAckAt = now;
+                if (_pendingWarmupPress == SingleCommand.Up) WarmupUpSent++;
+                else if (_pendingWarmupPress == SingleCommand.Down) WarmupDownSent++;
+                _pendingWarmupPress = null;
                 return true;
             }
             if (_session.LastError != null)

@@ -16,7 +16,8 @@ namespace StressTest.Core
 
         public const string RoundsHeader =
             "recorded_at,round_id,entry,firmware_version,firmware_params,gap_ms,total_count,segment_size,segments," +
-            "total_sent,total_drops,warmup_reading,end_reading,any_possibly_clamped,any_report_short,mean_gap_us,max_gap_us,status,void_reason";
+            "total_sent,total_drops,warmup_reading,end_reading,any_possibly_clamped,any_report_short,mean_gap_us,max_gap_us," +
+            "up_planned,down_planned,up_sent,down_sent,warmup_up,warmup_down,status,void_reason";
 
         private readonly TextWriter _commands;
         private readonly SegmentCsvWriter _segments;
@@ -93,6 +94,12 @@ namespace StressTest.Core
                 CsvFormat.Flag(summary.AnyReportShort),
                 summary.MeanGapMicros.ToString("F1", c),
                 summary.MaxGapMicros.ToString(c),
+                summary.UpPlanned.ToString(c),
+                summary.DownPlanned.ToString(c),
+                summary.UpSent.ToString(c),
+                summary.DownSent.ToString(c),
+                summary.WarmupUpSent.ToString(c),
+                summary.WarmupDownSent.ToString(c),
                 status,
                 CsvFormat.FreeText(voidReason)));
             _rounds.Flush();

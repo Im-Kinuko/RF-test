@@ -23,9 +23,25 @@ namespace StressTest.Tests
         }
 
         [Test]
+        public void BootSpeedEqualsBase_SkipsWarmupPressesAndAsksForReading()
+        {
+            // 跑步機開機就是 1.0 km/h，與計分起點相同：不需預熱
+            var h = new RoundHarness();
+
+            h.Start();
+            h.AdvanceUntil(RoundState.AwaitingWarmupReading, maxSeconds: 10);
+
+            Assert.That(h.Round.Config.BootSpeed, Is.EqualTo(1.0));
+            Assert.That(h.Round.Config.WarmupCount, Is.EqualTo(0));
+            Assert.That(h.Sent("ONE,UP"), Is.EqualTo(0));
+            Assert.That(h.Round.State, Is.EqualTo(RoundState.AwaitingWarmupReading));
+            Assert.That(h.Round.ExpectedPanelSpeed, Is.EqualTo(1.0).Within(1e-9));
+        }
+
+        [Test]
         public void WarmUp_SendsNineUpsOneSecondApartThenAsksForReading()
         {
-            var h = new RoundHarness();
+            var h = new RoundHarness(bootSpeed: 0.1);
 
             h.Start();
             h.AdvanceUntil(RoundState.WarmingUp);
@@ -40,7 +56,7 @@ namespace StressTest.Tests
         [Test]
         public void WarmUp_WaitsForAckBeforeNextPress()
         {
-            var h = new RoundHarness();
+            var h = new RoundHarness(bootSpeed: 0.1);
             h.Start();
             h.AdvanceUntil(RoundState.WarmingUp);
 

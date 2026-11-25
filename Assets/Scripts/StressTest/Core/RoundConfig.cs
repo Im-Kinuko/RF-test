@@ -5,7 +5,7 @@ namespace StressTest.Core
     /// <summary>一輪測試的條件與流程參數。</summary>
     public sealed class RoundConfig
     {
-        public RoundConfig(int gapMs, int totalCount, int segmentSize = 20, double baseSpeed = 1.0, double bootSpeed = 0.1)
+        public RoundConfig(int gapMs, int totalCount, int segmentSize = 20, double baseSpeed = 1.0, double bootSpeed = 1.0)
         {
             GapMs = gapMs;
             TotalCount = totalCount;
@@ -21,7 +21,7 @@ namespace StressTest.Core
         /// <summary>計分段的起點速度（km/h）。</summary>
         public double BaseSpeed { get; }
 
-        /// <summary>跑步機開機速度（km/h）。</summary>
+        /// <summary>跑步機開機速度（km/h）。XTERRA DT168 開機即為 1.0，與起點相同時不需預熱。</summary>
         public double BootSpeed { get; }
 
         /// <summary>預熱加速次數：從開機速度帶到起點速度。</summary>

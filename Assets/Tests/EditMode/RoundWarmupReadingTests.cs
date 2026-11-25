@@ -8,7 +8,7 @@ namespace StressTest.Tests
     {
         private static RoundHarness AtWarmupReading()
         {
-            var h = new RoundHarness(gapMs: 5, totalCount: 40);
+            var h = new RoundHarness(gapMs: 5, totalCount: 40, bootSpeed: 0.1);
             h.Start();
             h.AdvanceUntil(RoundState.AwaitingWarmupReading);
             return h;

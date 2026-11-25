@@ -31,7 +31,7 @@ namespace StressTest.Tests
         [Test]
         public void DuringWarmup_StopsWithoutAbort()
         {
-            var h = new RoundHarness();
+            var h = new RoundHarness(bootSpeed: 0.1);
             h.Start();
             h.AdvanceUntil(RoundState.WarmingUp);
 

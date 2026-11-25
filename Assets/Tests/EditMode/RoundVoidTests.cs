@@ -12,11 +12,11 @@ namespace StressTest.Tests
         [SetUp]
         public void SetUp() => _rounds = new StringWriter();
 
-        private RoundHarness NewHarness(FakeArduino arduino = null, int totalCount = 40)
+        private RoundHarness NewHarness(FakeArduino arduino = null, int totalCount = 40, double? bootSpeed = null)
         {
             var log = new RoundCsvLog(new StringWriter(), new StringWriter(), _rounds, writeHeaders: false,
                 () => new DateTime(2026, 11, 22, 10, 0, 0));
-            return new RoundHarness(gapMs: 5, totalCount: totalCount, arduino: arduino, log: log);
+            return new RoundHarness(gapMs: 5, totalCount: totalCount, arduino: arduino, log: log, bootSpeed: bootSpeed);
         }
 
         private string RoundRows() => _rounds.ToString().TrimEnd();
@@ -70,7 +70,7 @@ namespace StressTest.Tests
         [Test]
         public void FailedRound_IsWrittenAsVoidedWithFailureReason()
         {
-            var h = NewHarness();
+            var h = NewHarness(bootSpeed: 0.1);
             h.Start();
             h.AdvanceUntil(RoundState.WarmingUp);
             h.Arduino.ErrorReply = "BUSY";

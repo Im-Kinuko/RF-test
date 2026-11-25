@@ -6,13 +6,18 @@ namespace StressTest.Tests
     /// <summary>建立已連線的 session 與一輪測試，並以固定時間步推進。</summary>
     public sealed class RoundHarness
     {
-        public RoundHarness(int gapMs = 5, int totalCount = 40, FakeArduino arduino = null, RoundCsvLog log = null)
+        /// <param name="bootSpeed">跑步機開機速度；null 時用 RoundConfig 預設值（1.0，不需預熱）。</param>
+        public RoundHarness(int gapMs = 5, int totalCount = 40, FakeArduino arduino = null, RoundCsvLog log = null,
+            double? bootSpeed = null)
         {
             Arduino = arduino ?? new FakeArduino();
             Session = new StressTestSession(Arduino, EntryType.Opto);
             Session.BeginHandshake(0.0);
             Session.Poll(0.1);
-            Round = new TestRound(Session, new RoundConfig(gapMs, totalCount), "R1", log);
+            var config = bootSpeed.HasValue
+                ? new RoundConfig(gapMs, totalCount, bootSpeed: bootSpeed.Value)
+                : new RoundConfig(gapMs, totalCount);
+            Round = new TestRound(Session, config, "R1", log);
             Now = 1.0;
         }
 

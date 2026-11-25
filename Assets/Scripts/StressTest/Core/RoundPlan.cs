@@ -34,6 +34,19 @@ namespace StressTest.Core
 
         public IReadOnlyList<PlannedSegment> Segments { get; }
 
+        /// <summary>計分段預計送出的加速次數。</summary>
+        public int UpCount => CountOf(SegmentDirection.Up);
+
+        /// <summary>計分段預計送出的減速次數。</summary>
+        public int DownCount => CountOf(SegmentDirection.Down);
+
+        private int CountOf(SegmentDirection direction)
+        {
+            var total = 0;
+            foreach (var s in Segments) if (s.Direction == direction) total += s.Count;
+            return total;
+        }
+
         public static RoundPlan Create(int totalCount, int segmentSize, double baseSpeed)
         {
             if (totalCount < 1) throw new ArgumentOutOfRangeException(nameof(totalCount));

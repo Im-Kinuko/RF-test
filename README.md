@@ -36,13 +36,14 @@ Unity 送出測試指令給 Arduino，Arduino 用毫秒級的間隔連續送出�
 | 休息間隔 | 0／1／5／10 ms，從上一筆動作**完成後**開始計時 |
 | 每輪總次數 | 40／80／120 筆 |
 | 每段筆數 | 20 筆（可調），加速段和減速段輪流 |
-| 速度範圍 | 每段在 1.0 ↔ 3.0 km/h 之間來回，每次按鍵 ±0.1 km/h |
+| 速度範圍 | 開機 1.0 km/h；每段在 1.0 ↔ 3.0 km/h 之間來回，每次按鍵 ±0.1 km/h |
+| 加減速次數 | 40 次＝加速 20、減速 20；80 次＝各 40；120 次＝各 60。畫面和每輪 CSV 都會記下預計與實際送出的次數 |
 | 重複次數 | 每個條件 3 輪（可調） |
 | 條件總數 | 4 種間隔 × 3 種總次數 × 2 種入口 = 24 個條件，共 72 輪 |
 
 **一輪的流程**
 1. 送出「啟動」，倒數 5 秒，等跑帶穩定。
-2. 預熱：每秒加速 1 次，共 9 次，把速度從開機的 0.1 km/h 帶到 1.0 km/h。這段不計分。
+2. 跑步機開機速度就是 1.0 km/h，和計分起點相同，所以不需要預熱。如果確認時面板不是 1.0，可以選「重新預熱」，系統會用單發指令補足差額；這些單發不計分。
 3. 研究人員確認面板顯示 1.0。
 4. 依總次數分成 2／4／6 段。每段由 Arduino 連續送 20 筆，送完後研究人員輸入面板速度，確認後進入下一段。
 5. 送出「停止」，顯示本輪總結。
@@ -168,7 +169,7 @@ Unity 送出測試指令給 Arduino，Arduino 用毫秒級的間隔連續送出�
 |---|---|---|
 | `commands_*.csv` | 一筆指令 | `round_id`、`entry`、`gap_ms`、`segment_index`、`seq`、`direction`、`start_us`、`end_us`、`gap_us`（與上一筆的實際間隔） |
 | `segments_*.csv` | 一段 | `start_speed`、`expected_end`、`actual_end`、`drops`、`reported_count`、`report_short`、`timed_out`、`possibly_clamped`、`mean_gap_us`、`max_gap_us` |
-| `rounds_*.csv` | 一輪 | `entry`、`gap_ms`、`total_count`、`total_sent`、`total_drops`、`warmup_reading`、`end_reading`、`status`（`completed`／`voided`）、`void_reason` |
+| `rounds_*.csv` | 一輪 | `entry`、`gap_ms`、`total_count`、`total_sent`、`total_drops`、`warmup_reading`、`end_reading`、`up_planned`／`down_planned`（預計加速／減速次數）、`up_sent`／`down_sent`（Arduino 實際回報送出的次數）、`warmup_up`／`warmup_down`（預熱單發，不計分）、`status`（`completed`／`voided`）、`void_reason` |
 | `manual_segments_*.csv` | 手動單段的一段 | 與 `segments_*.csv` 相同，但 `round_id` 和 `segment_index` 欄位留空 |
 
 **整理論文用的掉包表**

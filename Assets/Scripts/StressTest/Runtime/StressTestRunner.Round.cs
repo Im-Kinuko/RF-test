@@ -77,6 +77,10 @@ namespace StressTest.Runtime
                 ? $"　段 {r.SegmentIndex + 1}／{r.Plan.Segments.Count}"
                 : "";
             GUILayout.Label($"本輪：間隔 {r.Config.GapMs} ms、{r.Config.TotalCount} 次{segmentText}", _title);
+            GUILayout.Label(
+                $"加速 已送 {r.UpSent}／預計 {r.Plan.UpCount}　減速 已送 {r.DownSent}／預計 {r.Plan.DownCount}" +
+                (r.WarmupUpSent + r.WarmupDownSent > 0 ? $"　預熱 加速 {r.WarmupUpSent}、減速 {r.WarmupDownSent}" : ""),
+                _body);
             GUILayout.Label("輪次 ID：" + r.RoundId, _small);
             GUILayout.Space(Px(12));
 
@@ -298,6 +302,10 @@ namespace StressTest.Runtime
             }
             GUILayout.Label(
                 $"實際間隔：平均 {summary.MeanGapMicros / 1000.0:F3} ms、最大 {summary.MaxGapMicros / 1000.0:F3} ms", _small);
+            GUILayout.Label(
+                $"加速：預計 {summary.UpPlanned}、Arduino 實送 {summary.UpSent}　減速：預計 {summary.DownPlanned}、Arduino 實送 {summary.DownSent}" +
+                $"　預熱（不計分）：加速 {summary.WarmupUpSent}、減速 {summary.WarmupDownSent}",
+                _small);
             if (_roundLogFolder != null) GUILayout.Label("紀錄位置：" + _roundLogFolder, _small);
         }
     }
