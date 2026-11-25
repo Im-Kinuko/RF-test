@@ -6,7 +6,9 @@ Unity 送出測試指令給 Arduino，Arduino 用毫秒級的間隔連續送出�
 
 > 研究背景：研究問題一，「在相同加減速指令與不同發送間隔下，兩個控制入口能否正確輸出」。外部遙控器監聽（研究問題二）不在本專案範圍內。
 
-![介面（1280×720）](Docs/screenshots/idle_1280x720.png)
+![介面](Docs/screenshots/ui/05_idle.png)
+
+> 全部 25 個畫面的截圖與說明見 [Docs/UI-Screens.md](Docs/UI-Screens.md)。
 
 ---
 
@@ -102,7 +104,7 @@ Unity 送出測試指令給 Arduino，Arduino 用毫秒級的間隔連續送出�
 
 ## 操作流程
 
-介面分成三個區域。每個畫面只有一個綠色的主要按鈕，照著按就能往下走。
+介面分成三個區域。每個畫面只有一個綠色的主要按鈕，照著按就能往下走。每個畫面的截圖和說明，包括各種異常狀況，都整理在 **[Docs/UI-Screens.md](Docs/UI-Screens.md)**。
 
 | 區域 | 內容 |
 |---|---|
@@ -124,6 +126,10 @@ Unity 送出測試指令給 Arduino，Arduino 用毫秒級的間隔連續送出�
 
 ### 輸入面板速度
 
+| 輸入讀數 | 確認推算的掉包數 |
+|---|---|
+| ![輸入讀數](Docs/screenshots/ui/12_round_segment_reading.png) | ![確認掉包](Docs/screenshots/ui/13_round_segment_confirm.png) |
+
 - 每段結束時，畫面會用大字顯示「預期 X.X km/h」，輸入框會自動取得焦點。
 - 可以輸入 `2.7`，也可以直接照面板上的數字打 `27`。
 - 按 **Enter** 後會先顯示這一段推算的掉包數，再按一次 **Enter** 才會進入下一段。
@@ -141,6 +147,8 @@ Unity 送出測試指令給 Arduino，Arduino 用毫秒級的間隔連續送出�
 緊急停止的那一輪會自動記為作廢。
 
 ### 作廢與續測
+
+![本輪總結](Docs/screenshots/ui/14_round_summary.png)
 
 - 在總結畫面可以填寫原因後按「作廢此輪」。作廢的輪次會保留原始資料，但不計入矩陣的進度。
 - 每次啟動時，工具會讀取 `TestLogs/rounds_*.csv` 並還原進度，所以可以分好幾天測。
@@ -225,7 +233,13 @@ Arduino 用 `micros()` 記錄每一筆的開始和結束時間。這些時間戳
 & "<Unity 安裝路徑>\6000.6.10f1\Editor\Unity.exe" -batchmode -quit -projectPath . -executeMethod StressTest.EditorTools.StressTestBuild.BuildWindows -stresstest-build-path Build\StressTest.exe
 ```
 
-執行檔可以加參數 `-stresstest-screenshot <路徑>`：啟動後會自動截圖並結束，用來在不同解析度下檢查版面。例如：
+**版面導覽**：執行檔加上參數 `-stresstest-tour <資料夾>` 啟動時，會接上內建的模擬韌體 `SimulatedArduino`，自動走過所有畫面，逐一截圖（共 25 張）後結束。[Docs/UI-Screens.md](Docs/UI-Screens.md) 裡的截圖就是這樣產生的：
+
+```powershell
+Build\StressTest.exe -screen-fullscreen 0 -screen-width 1920 -screen-height 1080 -stresstest-tour Docs\screenshots\ui
+```
+
+**單張截圖**：執行檔加上參數 `-stresstest-screenshot <路徑>`，啟動後會自動截一張圖然後結束，用來在不同解析度下檢查版面。例如：
 
 ```powershell
 Build\StressTest.exe -screen-fullscreen 0 -screen-width 1280 -screen-height 720 -stresstest-screenshot shot.png
@@ -257,7 +271,8 @@ Assets/
       PanelSpeedInput.cs      面板速度輸入解析
     Runtime/                  Unity 介面（OnGUI）與序列埠
       SerialPortLink.cs       ISerialLink 的正式實作
-      StressTestRunner*.cs    三區版面、輪次畫面、矩陣、樣式
+      StressTestRunner*.cs    三區版面、輪次畫面、矩陣、樣式、版面導覽
+      SimulatedArduino.cs     模擬韌體（只供版面導覽截圖用）
     Editor/StressTestBuild.cs batchmode 建置腳本
   Tests/EditMode/             FakeArduino 與 97 個測試
 Docs/
@@ -306,12 +321,13 @@ Docs/
 | 核心流程、介面、CSV、條件矩陣、緊急停止 | 完成，97 個自動化測試通過 |
 | 兩支韌體 | 已用 avr-g++ 做過語法檢查，**尚未燒錄實測** |
 | 台架驗收與前測 | 清單已完成，**等待接上硬體執行** |
-| 連線後各畫面的版面 | 只截過未連線的畫面，其他畫面要接上 Arduino 才看得到 |
+| 所有畫面的版面 | 已用模擬韌體走過全部 25 個畫面並截圖確認（見 [Docs/UI-Screens.md](Docs/UI-Screens.md)）；接真實 Arduino 的實機操作尚未做 |
 
 ---
 
 ## 相關文件
 
 - [Docs/StressTest-Spec.md](Docs/StressTest-Spec.md)：完整規格，包含使用者故事、實作決策、測試策略
+- [Docs/UI-Screens.md](Docs/UI-Screens.md)：所有畫面的截圖與說明
 - [Docs/BenchAcceptance.md](Docs/BenchAcceptance.md)：台架驗收與前測的逐項清單
 - [.scratch/stress-test/issues/](.scratch/stress-test/issues/)：每張開發票的驗收項目與完成紀錄

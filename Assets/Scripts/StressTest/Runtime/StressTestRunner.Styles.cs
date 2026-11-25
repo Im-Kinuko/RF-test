@@ -10,7 +10,7 @@ namespace StressTest.Runtime
     public sealed partial class StressTestRunner
     {
         private float _scale = -1f;
-        private GUIStyle _big, _primary, _danger, _cell, _title, _body, _small, _huge, _input, _panel, _light;
+        private GUIStyle _big, _primary, _danger, _cell, _title, _body, _small, _huge, _input, _panel;
 
         private float Px(float value) => Mathf.Round(value * _scale);
 
@@ -42,7 +42,6 @@ namespace StressTest.Runtime
             foreach (var label in new[] { _title, _body, _small, _huge }) label.clipping = TextClipping.Overflow;
 
             _panel = new GUIStyle(GUI.skin.box) { normal = { background = SolidTexture(new Color(0.13f, 0.14f, 0.16f)) } };
-            _light = new GUIStyle(GUI.skin.box);
         }
 
         private static Texture2D SolidTexture(Color color)

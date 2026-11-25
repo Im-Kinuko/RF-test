@@ -23,7 +23,7 @@ namespace StressTest.Runtime
         private string[] _ports = new string[0];
         private int _portIndex = -1;
         private EntryType _entry = EntryType.Opto;
-        private SerialPortLink _link;
+        private ISerialLink _link; // 正式為 SerialPortLink；版面導覽時為 SimulatedArduino
         private StressTestSession _session;
         private string _connectError;
 
@@ -114,8 +114,9 @@ namespace StressTest.Runtime
         private void Connect()
         {
             var portName = _portIndex >= 0 ? _ports[_portIndex] : null;
-            _link = SerialPortLink.TryOpen(portName, out _connectError);
-            if (_link == null) return;
+            var serial = SerialPortLink.TryOpen(portName, out _connectError);
+            if (serial == null) return;
+            _link = serial;
 
             SavePreferences();
             _session = new StressTestSession(_link, _entry);
@@ -130,7 +131,7 @@ namespace StressTest.Runtime
             _round = null;
             _manualStopPending = false;
             _session = null;
-            _link?.Dispose();
+            (_link as IDisposable)?.Dispose();
             _link = null;
         }
 
@@ -194,10 +195,9 @@ namespace StressTest.Runtime
             GetStatus(out var light, out var text);
 
             GUILayout.BeginHorizontal();
-            var previous = GUI.color;
-            GUI.color = light;
-            GUILayout.Box(GUIContent.none, _light, GUILayout.Width(Px(36)), GUILayout.Height(Px(36)));
-            GUI.color = previous;
+            // 實心圓點：直接以顏色畫白色貼圖，不受深色 box 背景影響
+            var lightRect = GUILayoutUtility.GetRect(Px(36), Px(36), GUILayout.Width(Px(36)), GUILayout.Height(Px(36)));
+            GUI.DrawTexture(lightRect, Texture2D.whiteTexture, ScaleMode.StretchToFill, false, 0, light, 0, Px(18));
 
             GUILayout.BeginVertical();
             GUILayout.Label(text, _title);
@@ -430,7 +430,8 @@ namespace StressTest.Runtime
             GUILayout.Label($"執行中：{DirectionLabels[(int)segment.Direction]} {segment.Count} 筆，間隔 {segment.GapMs} ms", _body);
             var rect = GUILayoutUtility.GetRect(100, Px(24), GUILayout.ExpandWidth(true));
             GUI.Box(rect, GUIContent.none);
-            GUI.Box(new Rect(rect.x, rect.y, rect.width * Mathf.Clamp01((float)(elapsed / estimate)), rect.height), GUIContent.none);
+            var filled = new Rect(rect.x, rect.y, rect.width * Mathf.Clamp01((float)(elapsed / estimate)), rect.height);
+            GUI.DrawTexture(filled, Texture2D.whiteTexture, ScaleMode.StretchToFill, false, 0, new Color(0.3f, 0.6f, 0.95f), 0, 0);
         }
 
         private void DrawAwaitingReading()
@@ -450,6 +451,14 @@ namespace StressTest.Runtime
         private void DrawReadingInput(double expectedSpeed, Action<double> onSubmit)
         {
             GUILayout.Label($"請看面板，預期 {expectedSpeed:F1} km/h", _huge);
+            if (expectedSpeed < PanelSpeedInput.Min - 1e-9)
+            {
+                GUILayout.Label($"預期低於跑步機最低速度 {PanelSpeedInput.Min:F1}，面板會停在 {PanelSpeedInput.Min:F1}：請照實際面板輸入，這段會標記「可能觸底」。", _title);
+            }
+            else if (expectedSpeed > PanelSpeedInput.Max + 1e-9)
+            {
+                GUILayout.Label($"預期高於跑步機最高速度 {PanelSpeedInput.Max:F1}：請照實際面板輸入，這段會標記「可能觸頂」。", _title);
+            }
 
             var submit = false;
             var e = Event.current;
@@ -538,7 +547,7 @@ namespace StressTest.Runtime
             {
                 GUILayout.Label($"韌體回報錯誤：{_session.LastError}", _small);
             }
-            else if (_session?.LastAck != null)
+            else if (_session?.LastAck != null && _session.LastAck.StartsWith("ONE,"))
             {
                 GUILayout.Label($"韌體已執行：{_session.LastAck}", _small);
             }
