@@ -34,7 +34,7 @@ namespace StressTest.Runtime
         private const string ReadingControl = "PanelReading";
         private SegmentDirection _direction = SegmentDirection.Up;
         private int _gapIndex;
-        private string _countText = "20";
+        private string _countText = "30";
         private string _startText = "2.0";
         private string _readingText = "";
         private string _inputError;
@@ -393,9 +393,10 @@ namespace StressTest.Runtime
         private void StartSegment()
         {
             _inputError = null;
-            if (!int.TryParse(_countText, out var count) || count < 1 || count > 32)
+            var maxCount = _session.Firmware.MaxRunCount;
+            if (!int.TryParse(_countText, out var count) || count < 1 || count > maxCount)
             {
-                _inputError = "筆數請輸入 1～32。";
+                _inputError = $"筆數請輸入 1～{maxCount}。";
                 return;
             }
             if (!PanelSpeedInput.TryParse(_startText, out var startSpeed))
@@ -458,6 +459,11 @@ namespace StressTest.Runtime
             else if (expectedSpeed > PanelSpeedInput.Max + 1e-9)
             {
                 GUILayout.Label($"預期高於跑步機最高速度 {PanelSpeedInput.Max:F1}：請照實際面板輸入，這段會標記「可能觸頂」。", _title);
+            }
+
+            else if (expectedSpeed >= 10 - 1e-9)
+            {
+                GUILayout.Label($"10 以上請打三位數或加小數點：{expectedSpeed:F1} 打「{expectedSpeed * 10:F0}」。只打兩位數會被當成 1.x。", _title);
             }
 
             var submit = false;

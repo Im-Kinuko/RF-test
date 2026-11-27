@@ -11,11 +11,9 @@ namespace StressTest.Runtime
         private const string PrefPort = "StressTest.Port";
         private const string PrefEntry = "StressTest.Entry";
         private const string PrefRepetitions = "StressTest.Repetitions";
-        private const string PrefSegmentSize = "StressTest.SegmentSize";
 
         private ConditionMatrix _matrix = new ConditionMatrix(3);
         private string _repetitionsText = "3";
-        private string _segmentSizeText = "20";
         private string _preferredPort;
         private string _restoreMessage;
 
@@ -24,7 +22,6 @@ namespace StressTest.Runtime
             _preferredPort = PlayerPrefs.GetString(PrefPort, null);
             _entry = PlayerPrefs.GetInt(PrefEntry, 0) == 1 ? EntryType.Rf : EntryType.Opto;
             _repetitionsText = PlayerPrefs.GetInt(PrefRepetitions, 3).ToString();
-            _segmentSizeText = PlayerPrefs.GetInt(PrefSegmentSize, 20).ToString();
             if (int.TryParse(_repetitionsText, out var reps)) _matrix.Repetitions = reps;
         }
 
@@ -33,7 +30,6 @@ namespace StressTest.Runtime
             if (_portIndex >= 0 && _portIndex < _ports.Length) PlayerPrefs.SetString(PrefPort, _ports[_portIndex]);
             PlayerPrefs.SetInt(PrefEntry, _entry == EntryType.Rf ? 1 : 0);
             if (int.TryParse(_repetitionsText, out var reps)) PlayerPrefs.SetInt(PrefRepetitions, reps);
-            if (int.TryParse(_segmentSizeText, out var size)) PlayerPrefs.SetInt(PrefSegmentSize, size);
             PlayerPrefs.Save();
         }
 
@@ -68,13 +64,6 @@ namespace StressTest.Runtime
             while ((line = reader.ReadLine()) != null) yield return line;
         }
 
-        private bool TryReadSegmentSize(out int segmentSize)
-        {
-            if (int.TryParse(_segmentSizeText, out segmentSize) && segmentSize >= 1 && segmentSize <= 32) return true;
-            _roundMessage = "每段筆數請輸入 1～32。";
-            return false;
-        }
-
         /// <summary>右側：條件矩陣、輪數設定、排程建議。格子是次要按鈕，只有閒置時可按。</summary>
         private void DrawMatrixPanel()
         {
@@ -86,18 +75,17 @@ namespace StressTest.Runtime
             GUILayout.Label("每條件輪數", _body, GUILayout.Width(Px(110)));
             _repetitionsText = GUILayout.TextField(_repetitionsText, _input, GUILayout.Width(Px(70)));
             if (int.TryParse(_repetitionsText, out var reps) && reps >= 1 && reps <= 20) _matrix.Repetitions = reps;
-            GUILayout.Space(Px(16));
-            GUILayout.Label("每段筆數", _body, GUILayout.Width(Px(90)));
-            _segmentSizeText = GUILayout.TextField(_segmentSizeText, _input, GUILayout.Width(Px(70)));
             GUILayout.EndHorizontal();
             GUI.enabled = true;
+
+            GUILayout.Label($"n＝每段筆數；一輪＝（加速 n、減速 n）× {RoundConfig.DefaultSets} 組。", _small);
 
             DrawMatrixGrid();
 
             var scheduled = _matrix.Next();
             GUILayout.Label(scheduled == null
                 ? "所有條件都已完成設定的輪數。"
-                : $"整體排程下一輪：{EntryLabels[(int)scheduled.Entry]}、{scheduled.GapMs} ms、{scheduled.TotalCount} 次（第 {scheduled.Repetition} 輪）",
+                : $"整體排程下一輪：{EntryLabels[(int)scheduled.Entry]}、{scheduled.GapMs} ms、n = {scheduled.N}（第 {scheduled.Repetition} 輪）",
                 _small);
 
             if (GUILayout.Button("開啟紀錄資料夾", _big)) OpenLogFolder();
@@ -113,22 +101,22 @@ namespace StressTest.Runtime
 
             GUILayout.BeginHorizontal();
             GUILayout.Label("", _body, GUILayout.Width(Px(70)));
-            foreach (var count in ConditionMatrix.Counts) GUILayout.Label($"{count} 次", _title, cellWidth);
+            foreach (var n in ConditionMatrix.NValues) GUILayout.Label($"n = {n}", _title, cellWidth);
             GUILayout.EndHorizontal();
 
             foreach (var gap in ConditionMatrix.Gaps)
             {
                 GUILayout.BeginHorizontal();
                 GUILayout.Label($"{gap} ms", _title, GUILayout.Width(Px(70)));
-                foreach (var count in ConditionMatrix.Counts)
+                foreach (var n in ConditionMatrix.NValues)
                 {
-                    var opto = _matrix.Completed(EntryType.Opto, gap, count);
-                    var rf = _matrix.Completed(EntryType.Rf, gap, count);
+                    var opto = _matrix.Completed(EntryType.Opto, gap, n);
+                    var rf = _matrix.Completed(EntryType.Rf, gap, n);
                     var done = opto >= _matrix.Repetitions && rf >= _matrix.Repetitions;
                     var label = $"光耦 {opto}/{_matrix.Repetitions}\nRF {rf}/{_matrix.Repetitions}" + (done ? "（完成）" : "");
 
                     GUI.enabled = CanStartRound;
-                    if (GUILayout.Button(label, _cell, cellWidth)) StartRound(gap, count);
+                    if (GUILayout.Button(label, _cell, cellWidth)) StartRound(gap, n);
                     GUI.enabled = true;
                 }
                 GUILayout.EndHorizontal();
@@ -147,15 +135,16 @@ namespace StressTest.Runtime
                 return;
             }
 
-            GUILayout.Label($"下一輪：{EntryLabels[(int)connected]}、間隔 {next.GapMs} ms、{next.TotalCount} 次", _huge);
-            var plan = int.TryParse(_segmentSizeText, out var size) && size >= 1 && size <= 32
-                ? RoundPlan.Create(next.TotalCount, size, new RoundConfig(next.GapMs, next.TotalCount).BaseSpeed)
-                : null;
-            if (plan != null)
-            {
-                GUILayout.Label($"加速 {plan.UpCount} 次、減速 {plan.DownCount} 次，分 {plan.Segments.Count} 段（每段 {size} 筆）", _title);
-            }
-            GUILayout.Label($"第 {next.Repetition} 輪。開始後會自動啟動跑步機（開機 1.0 km/h），預熱加速 10 次到 2.0 後開始計分（2.0↔4.0）。跑帶上請不要站人。", _body);
+            GUILayout.Label($"下一輪：{EntryLabels[(int)connected]}、間隔 {next.GapMs} ms、n = {next.N}", _huge);
+            var config = new RoundConfig(next.GapMs, next.N);
+            var plan = RoundPlan.Create(config.N, config.Sets, config.BaseSpeed);
+            GUILayout.Label($"（加速 {config.N}、減速 {config.N}）× {config.Sets} 組＝共 {config.TotalCount} 筆，分 {plan.Segments.Count} 段", _title);
+            GUILayout.Label(
+                $"第 {next.Repetition} 輪。開始後會自動啟動跑步機（開機 {config.BootSpeed:F1} km/h），" +
+                $"預熱加速 {config.WarmupCount} 次到 {config.BaseSpeed:F1} 後開始計分" +
+                $"（{config.BaseSpeed:F1}↔{plan.Segments[0].ExpectedEndSpeed:F1}）。跑帶上請不要站人。", _body);
+            var unsupported = TestRound.CheckFirmware(_session.Firmware, config);
+            if (unsupported != null) GUILayout.Label(unsupported, _title);
 
             var scheduled = _matrix.Next();
             if (scheduled != null && scheduled.Entry != connected)
@@ -163,8 +152,8 @@ namespace StressTest.Runtime
                 GUILayout.Label($"依整體排程下一輪輪到{EntryLabels[(int)scheduled.Entry]}；也可以先繼續用{EntryLabels[(int)connected]}。", _small);
             }
 
-            GUI.enabled = CanStartRound;
-            PrimaryButton("開始下一輪", () => StartRound(next.GapMs, next.TotalCount));
+            GUI.enabled = CanStartRound && unsupported == null;
+            PrimaryButton("開始下一輪", () => StartRound(next.GapMs, next.N));
             GUI.enabled = true;
         }
 

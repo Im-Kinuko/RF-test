@@ -6,21 +6,20 @@ namespace StressTest.Tests
 {
     public class RoundPlanTests
     {
-        [TestCase(40, 2)]
-        [TestCase(80, 4)]
-        [TestCase(120, 6)]
-        public void TotalCount_SplitsIntoSegmentsOfTwenty(int total, int expectedSegments)
+        [TestCase(30)]
+        [TestCase(60)]
+        [TestCase(90)]
+        public void TwoSets_FourSegmentsOfNEach(int n)
         {
-            var plan = RoundPlan.Create(total, segmentSize: 20, baseSpeed: 1.0);
+            var plan = RoundPlan.Create(n, sets: 2, baseSpeed: 2.0);
 
-            Assert.That(plan.Segments, Has.Count.EqualTo(expectedSegments));
-            Assert.That(plan.Segments.Sum(s => s.Count), Is.EqualTo(total));
+            Assert.That(plan.Segments.Select(s => s.Count), Is.EqualTo(new[] { n, n, n, n }));
         }
 
         [Test]
         public void Segments_AlternateUpAndDownBetweenOneAndThree()
         {
-            var plan = RoundPlan.Create(80, segmentSize: 20, baseSpeed: 1.0);
+            var plan = RoundPlan.Create(20, sets: 2, baseSpeed: 1.0);
 
             Assert.That(plan.Segments.Select(s => s.Direction), Is.EqualTo(new[]
             {
@@ -31,11 +30,11 @@ namespace StressTest.Tests
         }
 
         [Test]
-        public void SegmentSize_IsConfigurable_LastSegmentTakesRemainder()
+        public void LargestN_StaysWithinPanelRange()
         {
-            var plan = RoundPlan.Create(40, segmentSize: 15, baseSpeed: 1.0);
+            var plan = RoundPlan.Create(90, sets: 2, baseSpeed: 2.0);
 
-            Assert.That(plan.Segments.Select(s => s.Count), Is.EqualTo(new[] { 15, 15, 10 }));
+            Assert.That(plan.Segments.Max(s => s.ExpectedEndSpeed), Is.EqualTo(11.0).Within(1e-9));
             Assert.That(plan.Segments.Last().ExpectedEndSpeed, Is.EqualTo(2.0).Within(1e-9));
         }
     }

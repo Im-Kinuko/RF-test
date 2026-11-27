@@ -9,7 +9,7 @@ namespace StressTest.Tests
         [Test]
         public void DuringSegment_AbortsThenStopsAndEndsVoided()
         {
-            var h = new RoundHarness(gapMs: 0, totalCount: 40, arduino: new FakeArduino { HangOnRun = true });
+            var h = new RoundHarness(gapMs: 0, arduino: new FakeArduino { HangOnRun = true });
             h.StartAndWarmUp();
             h.Round.Tick(h.Now + 0.1);
             Assert.That(h.Round.State, Is.EqualTo(RoundState.RunningSegment));
@@ -46,7 +46,7 @@ namespace StressTest.Tests
         [Test]
         public void WhileAwaitingReading_DiscardsSegmentAndStops()
         {
-            var h = new RoundHarness(gapMs: 0, totalCount: 40);
+            var h = new RoundHarness(gapMs: 0);
             h.StartAndWarmUp();
             h.AdvanceUntil(RoundState.AwaitingSegmentReading);
 
@@ -76,7 +76,7 @@ namespace StressTest.Tests
         public void AfterSegmentTimeout_AbortsLateRunBeforeStopping()
         {
             // 第一段逾時，韌體仍在跑；確認讀數後本輪在等遲到的 DONE
-            var h = new RoundHarness(gapMs: 0, totalCount: 40, arduino: new FakeArduino { HangOnRun = true });
+            var h = new RoundHarness(gapMs: 0, arduino: new FakeArduino { HangOnRun = true });
             h.StartAndWarmUp();
             h.CompleteSegment(3.0);
             Assert.That(h.Round.State, Is.EqualTo(RoundState.WaitingForLateDone));
@@ -93,7 +93,7 @@ namespace StressTest.Tests
         [Test]
         public void FirmwareIgnoresAbort_FailsAndTellsResearcherToUsePanelStop()
         {
-            var h = new RoundHarness(gapMs: 0, totalCount: 40,
+            var h = new RoundHarness(gapMs: 0,
                 arduino: new FakeArduino { HangOnRun = true, RespondToAbort = false });
             h.StartAndWarmUp();
 

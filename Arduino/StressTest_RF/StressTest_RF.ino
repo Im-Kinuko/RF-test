@@ -23,7 +23,7 @@
 
 #include <RCSwitch.h>
 
-const char FIRMWARE_VERSION[] = "0.3.0";
+const char FIRMWARE_VERSION[] = "0.4.0";
 const unsigned long BAUD_RATE = 115200;
 
 // ===== RF 發射 =====
@@ -43,7 +43,7 @@ const unsigned long RELEASE_MS = 250;   // 讓跑步機接收端判定「放開�
 const unsigned long ACTION_MS = 340;
 
 // ===== RUN 參數 =====
-const int MAX_RUN_COUNT = 32;           // 時間戳存 RAM：32 × 8 bytes
+const int MAX_RUN_COUNT = 90;           // 時間戳存 RAM：90 × 8 bytes = 720 bytes
 const unsigned long MAX_GAP_MS = 10000;
 unsigned long runStart[MAX_RUN_COUNT];
 unsigned long runEnd[MAX_RUN_COUNT];
@@ -64,7 +64,9 @@ void sendReady() {
   Serial.print(F(";release_ms="));
   Serial.print(RELEASE_MS);
   Serial.print(F(";action_ms="));
-  Serial.println(ACTION_MS);
+  Serial.print(ACTION_MS);
+  Serial.print(F(";max_run="));
+  Serial.println(MAX_RUN_COUNT);
 }
 
 void transmit(unsigned long code) {

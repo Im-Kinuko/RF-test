@@ -23,7 +23,7 @@ namespace StressTest.Core
         public long EndMicros { get; }
     }
 
-    /// <summary>一段連續指令（例如加速 20 筆）的設定與韌體回報。</summary>
+    /// <summary>一段連續指令（例如加速 30 筆）的設定與韌體回報。</summary>
     public sealed class SegmentRun
     {
         /// <summary>跑步機每次按鍵的速度變化（km/h）。</summary>

@@ -21,7 +21,7 @@
  * 期間收到的指令行在段結束後一律回 ERR,BUSY，不會被執行。
  *************************************************/
 
-const char FIRMWARE_VERSION[] = "0.3.0";
+const char FIRMWARE_VERSION[] = "0.4.0";
 const unsigned long BAUD_RATE = 115200;
 
 // ===== 光耦腳位（與正式版相同） =====
@@ -34,7 +34,7 @@ const int PIN_START = 6;
 const unsigned long PRESS_MS = 120;
 
 // ===== RUN 參數 =====
-const int MAX_RUN_COUNT = 32;          // 時間戳存 RAM：32 × 8 bytes
+const int MAX_RUN_COUNT = 90;          // 時間戳存 RAM：90 × 8 bytes = 720 bytes
 const unsigned long MAX_GAP_MS = 10000;
 unsigned long runStart[MAX_RUN_COUNT];
 unsigned long runEnd[MAX_RUN_COUNT];
@@ -58,7 +58,9 @@ void sendReady() {
   Serial.print(F(",press_ms="));
   Serial.print(PRESS_MS);
   Serial.print(F(";action_ms="));
-  Serial.println(PRESS_MS);
+  Serial.print(PRESS_MS);
+  Serial.print(F(";max_run="));
+  Serial.println(MAX_RUN_COUNT);
 }
 
 void press(int pin) {

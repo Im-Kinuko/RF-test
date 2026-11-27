@@ -12,11 +12,11 @@ namespace StressTest.Tests
         [SetUp]
         public void SetUp() => _rounds = new StringWriter();
 
-        private RoundHarness NewHarness(FakeArduino arduino = null, int totalCount = 40, double? bootSpeed = null)
+        private RoundHarness NewHarness(FakeArduino arduino = null, double? bootSpeed = null)
         {
             var log = new RoundCsvLog(new StringWriter(), new StringWriter(), _rounds, writeHeaders: false,
                 () => new DateTime(2026, 11, 22, 10, 0, 0));
-            return new RoundHarness(gapMs: 5, totalCount: totalCount, arduino: arduino, log: log, bootSpeed: bootSpeed);
+            return new RoundHarness(gapMs: 5, arduino: arduino, log: log, bootSpeed: bootSpeed);
         }
 
         private string RoundRows() => _rounds.ToString().TrimEnd();

@@ -12,6 +12,7 @@ namespace StressTest.Tests
         [TestCase(" 2.7 ", 2.7)]
         [TestCase("12", 1.2)]
         [TestCase("12.0", 12.0)]
+        [TestCase("110", 11.0)] // n = 90 的加速段終點
         public void Accepts(string text, double expected)
         {
             Assert.That(PanelSpeedInput.TryParse(text, out var speed), Is.True);

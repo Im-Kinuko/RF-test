@@ -5,22 +5,21 @@ namespace StressTest.Tests
 {
     public class RoundPressCountTests
     {
-        [TestCase(40, 20, 20, 20)]
-        [TestCase(80, 20, 40, 40)]
-        [TestCase(120, 20, 60, 60)]
-        [TestCase(40, 15, 25, 15)] // 15 加、15 減、10 加
-        public void Plan_CountsUpAndDownPresses(int total, int segmentSize, int ups, int downs)
+        [TestCase(30, 60)]
+        [TestCase(60, 120)]
+        [TestCase(90, 180)]
+        public void Plan_CountsUpAndDownPresses(int n, int perDirection)
         {
-            var plan = RoundPlan.Create(total, segmentSize, baseSpeed: 1.0);
+            var plan = RoundPlan.Create(n, sets: 2, baseSpeed: 2.0);
 
-            Assert.That(plan.UpCount, Is.EqualTo(ups));
-            Assert.That(plan.DownCount, Is.EqualTo(downs));
+            Assert.That(plan.UpCount, Is.EqualTo(perDirection));
+            Assert.That(plan.DownCount, Is.EqualTo(perDirection));
         }
 
         [Test]
         public void CompletedRound_ReportsPlannedAndSentPressesByDirection()
         {
-            var h = new RoundHarness(gapMs: 5, totalCount: 80);
+            var h = new RoundHarness(gapMs: 5, sets: 2);
             h.StartAndWarmUp();
             h.CompleteSegment(3.0);
             h.CompleteSegment(1.0);
@@ -39,7 +38,7 @@ namespace StressTest.Tests
         public void SentCounts_UseArduinoReportedCounts()
         {
             // 韌體每段只回報 17 筆
-            var h = new RoundHarness(gapMs: 0, totalCount: 40, arduino: new FakeArduino { ReportOnly = 17 });
+            var h = new RoundHarness(gapMs: 0, arduino: new FakeArduino { ReportOnly = 17 });
             h.StartAndWarmUp();
             h.CompleteSegment(2.7);
             h.CompleteSegment(1.0);
@@ -54,7 +53,7 @@ namespace StressTest.Tests
         [Test]
         public void WarmupAndRewarmPresses_AreCountedSeparately()
         {
-            var h = new RoundHarness(gapMs: 5, totalCount: 40, bootSpeed: 0.1);
+            var h = new RoundHarness(gapMs: 5, bootSpeed: 0.1);
             h.Start();
             h.AdvanceUntil(RoundState.AwaitingWarmupReading);
             h.Round.EnterReading(1.2);
@@ -70,7 +69,7 @@ namespace StressTest.Tests
         [Test]
         public void RejectedWarmupPress_IsNotCounted()
         {
-            var h = new RoundHarness(gapMs: 5, totalCount: 40, bootSpeed: 0.1);
+            var h = new RoundHarness(gapMs: 5, bootSpeed: 0.1);
             h.Start();
             h.AdvanceUntil(RoundState.WarmingUp);
             h.Round.Tick(h.Now + 0.1);          // 第 1 次加速已 ACK
@@ -83,7 +82,7 @@ namespace StressTest.Tests
         [Test]
         public void DuringRound_SentCountsGrowSegmentBySegment()
         {
-            var h = new RoundHarness(gapMs: 5, totalCount: 40);
+            var h = new RoundHarness(gapMs: 5);
             h.StartAndWarmUp();
             h.CompleteSegment(3.0);
 

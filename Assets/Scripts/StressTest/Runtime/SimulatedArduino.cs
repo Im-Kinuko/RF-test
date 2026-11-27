@@ -14,7 +14,7 @@ namespace StressTest.Runtime
         private string _heldRun;
 
         public string Entry { get; set; } = "OPTO";
-        public string Parameters { get; set; } = "press_ms=120;action_ms=120";
+        public string Parameters { get; set; } = "press_ms=120;action_ms=120;max_run=90";
         public bool RespondToHello { get; set; } = true;
         public bool RespondToAbort { get; set; } = true;
 
@@ -30,7 +30,7 @@ namespace StressTest.Runtime
         {
             if (line == "HELLO")
             {
-                if (RespondToHello) _outgoing.Enqueue($"READY,{Entry},0.3.0,{Parameters}");
+                if (RespondToHello) _outgoing.Enqueue($"READY,{Entry},0.4.0,{Parameters}");
             }
             else if (line.StartsWith("ONE,"))
             {

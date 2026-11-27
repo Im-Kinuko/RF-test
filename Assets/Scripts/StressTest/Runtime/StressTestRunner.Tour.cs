@@ -33,7 +33,7 @@ namespace StressTest.Runtime
 
             // ---- 連線異常 ----
             _entry = EntryType.Opto;
-            ConnectSimulated(new SimulatedArduino { Entry = "RF", Parameters = "bits=24;repeat=2;release_ms=250;action_ms=340" });
+            ConnectSimulated(new SimulatedArduino { Entry = "RF", Parameters = "bits=24;repeat=2;release_ms=250;action_ms=340;max_run=90" });
             yield return Until(() => _session.State == SessionState.EntryMismatch, 3);
             yield return Shot("entry_mismatch");
             Disconnect();
@@ -48,12 +48,12 @@ namespace StressTest.Runtime
             var sim = new SimulatedArduino();
             ConnectSimulated(sim);
             yield return Until(() => _session.State == SessionState.Ready, 3);
-            foreach (var (gap, count) in new[] { (0, 40), (0, 80), (0, 120), (1, 40) })
+            foreach (var (gap, n) in new[] { (0, 30), (0, 60), (0, 90), (1, 30) })
             {
-                _matrix.Record(EntryType.Opto, gap, count, voided: false);
-                _matrix.Record(EntryType.Rf, gap, count, voided: false);
+                _matrix.Record(EntryType.Opto, gap, n, voided: false);
+                _matrix.Record(EntryType.Rf, gap, n, voided: false);
             }
-            _matrix.Record(EntryType.Opto, 1, 80, voided: false);
+            _matrix.Record(EntryType.Opto, 1, 60, voided: false);
             _restoreMessage = "已從 2 個紀錄檔還原 9 輪完成紀錄。（導覽畫面，數字為模擬資料）";
             yield return Shot("idle");
 
@@ -62,7 +62,7 @@ namespace StressTest.Runtime
             _showManualTools = false;
 
             // ---- 一輪：啟動、預熱、各段、總結 ----
-            StartRound(1, 80);
+            StartRound(1, 30);
             yield return new WaitForSeconds(1.2f);
             yield return Shot("round_starting");
 
@@ -84,14 +84,14 @@ namespace StressTest.Runtime
 
             sim.ReleaseRun();
             yield return Until(() => _round.State == RoundState.AwaitingSegmentReading, 3);
-            _readingText = "3.7";
+            _readingText = "4.7";
             yield return Shot("round_segment_reading");
 
-            _round.EnterReading(3.7);
+            _round.EnterReading(4.7);
             yield return Shot("round_segment_confirm");
 
             sim.HoldRun = false;
-            foreach (var reading in new[] { 1.7, 3.7, 1.7 }) // 第 2～4 段（減、加、減）
+            foreach (var reading in new[] { 1.7, 4.7, 1.7 }) // 第 2～4 段（減、加、減）
             {
                 if (_round.State == RoundState.ConfirmingSegmentReading) ConfirmRound();
                 yield return Until(() => _round.State == RoundState.AwaitingSegmentReading
@@ -108,7 +108,7 @@ namespace StressTest.Runtime
             LeaveRound(_voidReasonText);
 
             // ---- 預熱讀數不符、回報不足、可能觸底 ----
-            StartRound(0, 40);
+            StartRound(0, 30);
             yield return Until(() => _round.State == RoundState.AwaitingWarmupReading, 20);
             _round.EnterReading(1.8);
             ConfirmRound();
@@ -126,21 +126,27 @@ namespace StressTest.Runtime
             _round.EnterReading(1.0);
             yield return Shot("round_clamped_confirm");
             sim.ReportOnly = null;
+            foreach (var reading in new[] { 4.0, 1.0 }) // 第 3、4 段
+            {
+                ConfirmRound();
+                yield return Until(() => _round.State == RoundState.AwaitingSegmentReading, 3);
+                _round.EnterReading(reading);
+            }
             ConfirmRound();
             yield return Until(() => _round.State == RoundState.Completed, 3);
             LeaveRound(null);
 
             // ---- 段逾時、等待遲到的 DONE、緊急停止沒有回應、失敗 ----
-            StartRound(5, 40);
+            StartRound(5, 30);
             yield return Until(() => _round.State == RoundState.AwaitingWarmupReading, 20);
             _round.EnterReading(2.0);
             sim.HoldRun = true;
             ConfirmRound();
-            yield return Until(() => _round.State == RoundState.AwaitingSegmentReading, 10);
-            _readingText = "4.0";
+            yield return Until(() => _round.State == RoundState.AwaitingSegmentReading, 12);
+            _readingText = "5.0";
             yield return Shot("round_segment_timeout");
 
-            _round.EnterReading(4.0);
+            _round.EnterReading(5.0);
             ConfirmRound();
             yield return Shot("round_waiting_late_done");
 
@@ -167,10 +173,10 @@ namespace StressTest.Runtime
 
             sim.ReleaseRun();
             yield return Until(() => _session.State == SessionState.AwaitingReading, 3);
-            _readingText = "3.9";
+            _readingText = "4.9";
             yield return Shot("manual_reading");
 
-            SubmitReading(3.9);
+            SubmitReading(4.9);
             yield return Shot("manual_result");
 
             Disconnect();

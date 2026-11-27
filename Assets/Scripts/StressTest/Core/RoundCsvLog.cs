@@ -12,10 +12,10 @@ namespace StressTest.Core
     public sealed class RoundCsvLog
     {
         public const string CommandsHeader =
-            "round_id,entry,gap_ms,total_count,segment_index,seq,direction,start_us,end_us,gap_us";
+            "round_id,entry,gap_ms,n,sets,segment_index,seq,direction,start_us,end_us,gap_us";
 
         public const string RoundsHeader =
-            "recorded_at,round_id,entry,firmware_version,firmware_params,gap_ms,total_count,segment_size,segments," +
+            "recorded_at,round_id,entry,firmware_version,firmware_params,gap_ms,n,sets,total_count,segments," +
             "total_sent,total_drops,warmup_reading,end_reading,any_possibly_clamped,any_report_short,mean_gap_us,max_gap_us," +
             "up_planned,down_planned,up_sent,down_sent,warmup_up,warmup_down,status,void_reason";
 
@@ -56,7 +56,8 @@ namespace StressTest.Core
                     roundId,
                     CsvFormat.Entry(firmware.Entry),
                     config.GapMs.ToString(c),
-                    config.TotalCount.ToString(c),
+                    config.N.ToString(c),
+                    config.Sets.ToString(c),
                     segmentIndex.ToString(c),
                     t.Index.ToString(c),
                     CsvFormat.Direction(s.Direction),
@@ -83,8 +84,9 @@ namespace StressTest.Core
                 firmware.Version,
                 parameters,
                 config.GapMs.ToString(c),
+                config.N.ToString(c),
+                config.Sets.ToString(c),
                 config.TotalCount.ToString(c),
-                config.SegmentSize.ToString(c),
                 summary.SegmentCount.ToString(c),
                 summary.TotalSent.ToString(c),
                 summary.TotalDrops.ToString(c),

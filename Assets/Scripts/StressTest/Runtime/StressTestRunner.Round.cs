@@ -20,14 +20,15 @@ namespace StressTest.Runtime
             && _round.State != RoundState.Completed
             && _round.State != RoundState.Failed;
 
-        private void StartRound(int gap, int total)
+        private void StartRound(int gap, int n)
         {
-            _roundMessage = null;
-            if (!TryReadSegmentSize(out var segmentSize)) return;
+            var config = new RoundConfig(gap, n);
+            _roundMessage = TestRound.CheckFirmware(_session.Firmware, config);
+            if (_roundMessage != null) return;
             SavePreferences();
 
             var entry = _session.Firmware.Entry == EntryType.Opto ? "OPTO" : "RF";
-            var roundId = $"{DateTime.Now:yyyyMMdd-HHmmss}-{entry}-G{gap}-N{total}";
+            var roundId = $"{DateTime.Now:yyyyMMdd-HHmmss}-{entry}-G{gap}-N{n}";
 
             try
             {
@@ -41,7 +42,7 @@ namespace StressTest.Runtime
 
             _readingText = "";
             _inputError = null;
-            _round = new TestRound(_session, new RoundConfig(gap, total, segmentSize), roundId, _roundLog);
+            _round = new TestRound(_session, config, roundId, _roundLog);
             _round.Start(Time.realtimeSinceStartupAsDouble);
         }
 
@@ -76,7 +77,7 @@ namespace StressTest.Runtime
                 || r.State == RoundState.ConfirmingSegmentReading
                 ? $"　段 {r.SegmentIndex + 1}／{r.Plan.Segments.Count}"
                 : "";
-            GUILayout.Label($"本輪：間隔 {r.Config.GapMs} ms、{r.Config.TotalCount} 次{segmentText}", _title);
+            GUILayout.Label($"本輪：間隔 {r.Config.GapMs} ms、n = {r.Config.N}（共 {r.Config.TotalCount} 筆）{segmentText}", _title);
             GUILayout.Label(
                 $"加速 已送 {r.UpSent}／預計 {r.Plan.UpCount}　減速 已送 {r.DownSent}／預計 {r.Plan.DownCount}" +
                 (r.WarmupUpSent + r.WarmupDownSent > 0 ? $"　預熱 加速 {r.WarmupUpSent}、減速 {r.WarmupDownSent}" : ""),
@@ -193,7 +194,7 @@ namespace StressTest.Runtime
             {
                 if (_round.Finish(voidReason))
                 {
-                    _matrix.Record(_session?.Firmware?.Entry ?? _entry, _round.Config.GapMs, _round.Config.TotalCount, _round.IsVoided);
+                    _matrix.Record(_session?.Firmware?.Entry ?? _entry, _round.Config.GapMs, _round.Config.N, _round.IsVoided);
                 }
             }
             catch (IOException e)

@@ -10,7 +10,7 @@ namespace StressTest.Tests
     {
         private readonly Queue<string> _outgoing = new Queue<string>();
 
-        public FakeArduino(string entry = "OPTO", string version = "0.1.0", string parameters = "press_ms=120;action_ms=120")
+        public FakeArduino(string entry = "OPTO", string version = "0.1.0", string parameters = "press_ms=120;action_ms=120;max_run=90")
         {
             Entry = entry;
             Version = version;

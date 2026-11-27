@@ -36,7 +36,7 @@ namespace StressTest.Core
             Config = config ?? throw new ArgumentNullException(nameof(config));
             RoundId = roundId;
             _log = log;
-            Plan = RoundPlan.Create(config.TotalCount, config.SegmentSize, config.BaseSpeed);
+            Plan = RoundPlan.Create(config.N, config.Sets, config.BaseSpeed);
         }
 
         public RoundConfig Config { get; }
@@ -66,9 +66,23 @@ namespace StressTest.Core
         /// <summary>輸入後、確認前的本段判定；其他時候為 null。</summary>
         public SegmentResult PendingResult { get; private set; }
 
+        /// <summary>目前的韌體跑不了這個條件時回傳原因，否則為 null。</summary>
+        public static string CheckFirmware(FirmwareInfo firmware, RoundConfig config)
+        {
+            if (firmware == null || config.N <= firmware.MaxRunCount) return null;
+            return $"韌體 v{firmware.Version} 每段最多 {firmware.MaxRunCount} 筆，本輪需要 {config.N} 筆。請燒錄最新的測試韌體。";
+        }
+
         public void Start(double now)
         {
             if (State != RoundState.Idle) return;
+
+            var unsupported = CheckFirmware(_session.Firmware, Config);
+            if (unsupported != null)
+            {
+                Fail(unsupported);
+                return;
+            }
 
             State = RoundState.Starting;
             CountdownRemaining = Config.StartCountdownSeconds;
@@ -371,9 +385,10 @@ namespace StressTest.Core
                 Fail("無法送出指令：Arduino 未連線或正在忙碌。");
                 return;
             }
-            _awaitingAck = true;
+            // 以 session 的累計 ACK 數為基準（前幾輪與手動單發也會累加）；
             // 前一個單發還沒 ACK 時（例如啟動中按緊急停止），兩個 ACK 都要收到
             _expectedAckCount = (_awaitingAck ? _expectedAckCount : _session.SingleAckCount) + 1;
+            _awaitingAck = true;
             _singleSentAt = now;
         }
 
