@@ -12,9 +12,10 @@ namespace StressTest.Runtime
         private readonly Queue<string> _outgoing = new Queue<string>();
         private long _micros = 1_000_000;
         private string _heldRun;
+        private int _executed;
 
         public string Entry { get; set; } = "OPTO";
-        public string Parameters { get; set; } = "press_ms=120;action_ms=120;max_run=90";
+        public string Parameters { get; set; } = "press_ms=120;action_ms=120;max_run=90;ack=1";
         public bool RespondToHello { get; set; } = true;
         public bool RespondToAbort { get; set; } = true;
 
@@ -30,11 +31,29 @@ namespace StressTest.Runtime
         {
             if (line == "HELLO")
             {
-                if (RespondToHello) _outgoing.Enqueue($"READY,{Entry},0.4.0,{Parameters}");
+                if (RespondToHello) _outgoing.Enqueue($"READY,{Entry},0.5.0,{Parameters}");
             }
             else if (line.StartsWith("ONE,"))
             {
                 _outgoing.Enqueue("ACK," + line);
+            }
+            else if (line == "ZERO")
+            {
+                _executed = 0;
+                _outgoing.Enqueue("ACK,ZERO");
+            }
+            else if (line.StartsWith("CMD,"))
+            {
+                if (!LineChecksum.TryUnwrap(line, out var payload)) return;
+                var start = _micros + 10;
+                var end = start + 120_000;
+                _outgoing.Enqueue(LineChecksum.Wrap($"X,{payload.Split(',')[1]},{_micros},{start},{end}"));
+                _micros = end + 5_000;
+                _executed++;
+            }
+            else if (line == "STAT")
+            {
+                _outgoing.Enqueue(LineChecksum.Wrap($"STAT,{_executed},{_executed},0"));
             }
             else if (line.StartsWith("RUN,"))
             {

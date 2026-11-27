@@ -67,11 +67,8 @@ namespace StressTest.Core
         public SegmentResult PendingResult { get; private set; }
 
         /// <summary>目前的韌體跑不了這個條件時回傳原因，否則為 null。</summary>
-        public static string CheckFirmware(FirmwareInfo firmware, RoundConfig config)
-        {
-            if (firmware == null || config.N <= firmware.MaxRunCount) return null;
-            return $"韌體 v{firmware.Version} 每段最多 {firmware.MaxRunCount} 筆，本輪需要 {config.N} 筆。請燒錄最新的測試韌體。";
-        }
+        public static string CheckFirmware(FirmwareInfo firmware, RoundConfig config) =>
+            firmware?.CheckSegment(config.Mode, config.N);
 
         public void Start(double now)
         {
@@ -366,7 +363,7 @@ namespace StressTest.Core
         private void StartSegment(int index, double startSpeed, double now)
         {
             var planned = Plan.Segments[index];
-            if (!_session.RunSegment(planned.Direction, planned.Count, Config.GapMs, startSpeed, now))
+            if (!_session.StartSegment(Config.Mode, planned.Direction, planned.Count, Config.GapMs, startSpeed, now))
             {
                 Fail("無法開始這一段：Arduino 未連線或仍在處理上一段。");
                 return;

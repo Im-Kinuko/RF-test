@@ -22,13 +22,13 @@ namespace StressTest.Runtime
 
         private void StartRound(int gap, int n)
         {
-            var config = new RoundConfig(gap, n);
+            var config = new RoundConfig(gap, n) { Mode = _mode };
             _roundMessage = TestRound.CheckFirmware(_session.Firmware, config);
             if (_roundMessage != null) return;
             SavePreferences();
 
             var entry = _session.Firmware.Entry == EntryType.Opto ? "OPTO" : "RF";
-            var roundId = $"{DateTime.Now:yyyyMMdd-HHmmss}-{entry}-G{gap}-N{n}";
+            var roundId = $"{DateTime.Now:yyyyMMdd-HHmmss}-{entry}-{config.Mode.Code()}-G{gap}-N{n}";
 
             try
             {
@@ -43,7 +43,7 @@ namespace StressTest.Runtime
             _readingText = "";
             _inputError = null;
             _round = new TestRound(_session, config, roundId, _roundLog);
-            _round.Start(Time.realtimeSinceStartupAsDouble);
+            _round.Start(MonotonicClock.Now);
         }
 
         private void EnsureRoundLog()
@@ -77,7 +77,7 @@ namespace StressTest.Runtime
                 || r.State == RoundState.ConfirmingSegmentReading
                 ? $"　段 {r.SegmentIndex + 1}／{r.Plan.Segments.Count}"
                 : "";
-            GUILayout.Label($"本輪：間隔 {r.Config.GapMs} ms、n = {r.Config.N}（共 {r.Config.TotalCount} 筆）{segmentText}", _title);
+            GUILayout.Label($"本輪（{r.Config.Mode.Code()}）：間隔 {r.Config.GapMs} ms、n = {r.Config.N}（共 {r.Config.TotalCount} 筆）{segmentText}", _title);
             GUILayout.Label(
                 $"加速 已送 {r.UpSent}／預計 {r.Plan.UpCount}　減速 已送 {r.DownSent}／預計 {r.Plan.DownCount}" +
                 (r.WarmupUpSent + r.WarmupDownSent > 0 ? $"　預熱 加速 {r.WarmupUpSent}、減速 {r.WarmupDownSent}" : ""),
@@ -117,8 +117,8 @@ namespace StressTest.Runtime
                     var reading = r.WarmupReading ?? 0;
                     GUILayout.Label($"面板是 {reading:F1} km/h，預期 {r.Config.BaseSpeed:F1} km/h", _huge);
                     GUILayout.BeginHorizontal();
-                    PrimaryButton("重新預熱（補足差額）", () => r.Rewarm(Time.realtimeSinceStartupAsDouble));
-                    if (GUILayout.Button($"以 {reading:F1} 為起點繼續", _big)) r.ContinueFromReading(Time.realtimeSinceStartupAsDouble);
+                    PrimaryButton("重新預熱（補足差額）", () => r.Rewarm(MonotonicClock.Now));
+                    if (GUILayout.Button($"以 {reading:F1} 為起點繼續", _big)) r.ContinueFromReading(MonotonicClock.Now);
                     GUILayout.EndHorizontal();
                     break;
 
@@ -194,7 +194,8 @@ namespace StressTest.Runtime
             {
                 if (_round.Finish(voidReason))
                 {
-                    _matrix.Record(_session?.Firmware?.Entry ?? _entry, _round.Config.GapMs, _round.Config.N, _round.IsVoided);
+                    _matrix.Record(_session?.Firmware?.Entry ?? _entry, _round.Config.GapMs, _round.Config.N, _round.IsVoided,
+                        _round.Config.Mode);
                 }
             }
             catch (IOException e)
@@ -206,7 +207,7 @@ namespace StressTest.Runtime
         /// <summary>任何狀態都可用：輪次進行中交給 TestRound；手動單段則中止並送停止。</summary>
         private void EmergencyStop()
         {
-            var now = Time.realtimeSinceStartupAsDouble;
+            var now = MonotonicClock.Now;
             if (RoundIsActive)
             {
                 _round.EmergencyStop(now);
@@ -260,7 +261,7 @@ namespace StressTest.Runtime
         private void ConfirmRound()
         {
             _readingText = "";
-            _round.Confirm(Time.realtimeSinceStartupAsDouble);
+            _round.Confirm(MonotonicClock.Now);
         }
 
         private void UndoRound()
@@ -272,6 +273,15 @@ namespace StressTest.Runtime
         private void DrawReportWarning(SegmentRun segment)
         {
             if (segment == null || !segment.ReportShort) return;
+            if (segment.Rebooted)
+                GUILayout.Label("注意：Arduino 在這段執行中重新開機。仍請輸入面板速度。", _title);
+            if (segment.Mode == SendMode.Ack)
+            {
+                GUILayout.Label(
+                    $"注意：電腦送出 {segment.PcSent}／{segment.Count} 筆，收到完成回覆 {segment.Replies} 筆，" +
+                    $"Arduino 執行 {segment.ArduinoExecuted?.ToString() ?? "不明"} 筆。仍請輸入面板速度。", _body);
+                return;
+            }
             var reported = segment.TimedOut ? "逾時未回報" : $"只回報 {segment.ReportedCount} 筆";
             GUILayout.Label($"注意：Arduino {reported}（應送 {segment.Count} 筆）。仍請輸入面板速度。", _body);
         }
@@ -283,10 +293,25 @@ namespace StressTest.Runtime
                 $"預期變化 {result.ExpectedChange:+0.0;-0.0} km/h，實際 {result.ActualChange:+0.0;-0.0;0.0} km/h；" +
                 $"Arduino 回報 {result.Segment.ReportedCount?.ToString() ?? "無"} 筆",
                 _body);
+            if (result.Segment.Mode == SendMode.Ack) GUILayout.Label(HopText(result), _title);
             if (result.PossiblyClamped)
                 GUILayout.Label("可能觸底／觸頂：理論終點超出 1.0～12.0，這段的掉包數不可信。", _title);
-            if (result.Segment.ReportShort)
-                GUILayout.Label("Arduino 回報不足：可能是序列埠或韌體問題，不一定是跑步機掉包。", _title);
+            if (result.Segment.Rebooted)
+                GUILayout.Label("Arduino 在這段中重新開機。", _title);
+            if (!result.Segment.ReportShort) return;
+            GUILayout.Label(result.Segment.Mode == SendMode.Ack
+                ? "有指令沒有完成往返。這是掉包資料，不需要因此作廢。"
+                : "Arduino 回報不足：可能是序列埠或韌體問題，不一定是跑步機掉包。", _title);
+        }
+
+        private static string Show(int? count) => count?.ToString() ?? "不明";
+
+        /// <summary>A 送法一段在各檢查點的筆數。</summary>
+        private static string HopText(SegmentResult result)
+        {
+            var s = result.Segment;
+            return $"電腦送 {s.PcSent} → Arduino 收 {Show(s.ArduinoReceived)} → 執行 {Show(s.ArduinoExecuted)}" +
+                   $" → 面板 {result.PanelSteps} 格（序列端少 {Show(result.LinkLost)}、跑步機端少 {Show(result.TreadmillMissing)}）";
         }
 
         private void DrawRoundSummary(RoundSummary summary)
@@ -295,11 +320,18 @@ namespace StressTest.Runtime
             for (var i = 0; i < summary.Results.Count; i++)
             {
                 var result = summary.Results[i];
-                var flags = (result.PossiblyClamped ? "　可能觸底／觸頂" : "") + (result.Segment.ReportShort ? "　回報不足" : "");
+                var flags = (result.PossiblyClamped ? "　可能觸底／觸頂" : "") + (result.Segment.ReportShort ? "　回報不足" : "")
+                            + (result.Segment.Rebooted ? "　重新開機" : "");
                 GUILayout.Label(
                     $"段 {i + 1}：{DirectionLabels[(int)result.Segment.Direction]} {result.Segment.Count} 筆，" +
                     $"{result.Segment.StartSpeed:F1} → {result.ActualEndSpeed:F1}，掉包 {result.Drops}{flags}",
                     _small);
+            }
+            if (summary.PcSent != null)
+            {
+                GUILayout.Label(
+                    $"各段合計：電腦送 {Show(summary.PcSent)}、Arduino 收 {Show(summary.ArduinoReceived)}、執行 {Show(summary.ArduinoExecuted)}；" +
+                    $"序列端少 {Show(summary.LinkLost)}、跑步機端少 {Show(summary.TreadmillMissing)}", _title);
             }
             GUILayout.Label(
                 $"實際間隔：平均 {summary.MeanGapMicros / 1000.0:F3} ms、最大 {summary.MaxGapMicros / 1000.0:F3} ms", _small);

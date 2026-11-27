@@ -29,8 +29,10 @@ namespace StressTest.Runtime
 
         // 手動單段
         private static readonly string[] DirectionLabels = { "加速", "減速" };
-        private static readonly int[] GapOptions = { 0, 1, 5, 10 };
-        private static readonly string[] GapLabels = { "0 ms", "1 ms", "5 ms", "10 ms" };
+        // 手動段多幾個長間隔給前測用（Docs/ExperimentDesign.md 第 9 節）
+        private static readonly int[] GapOptions = { 0, 1, 5, 10, 50, 100, 1000 };
+        private static readonly string[] GapLabels = { "0 ms", "1 ms", "5 ms", "10 ms", "50 ms", "100 ms", "1 s" };
+
         private const string ReadingControl = "PanelReading";
         private SegmentDirection _direction = SegmentDirection.Up;
         private int _gapIndex;
@@ -45,6 +47,11 @@ namespace StressTest.Runtime
         private string _segmentCsvPath;
         private SegmentRun _progressSegment;
         private bool _showManualTools;
+        private SegmentPacer _pacer;
+        private StreamWriter _commandFile;
+        private CommandCsvWriter _commandCsv;
+        // 背景執行緒會在畫面繪製中途改變狀態；版面依 Layout 時的快照決定，控制項數量才一致
+        private SessionState? _uiState;
 
         private static string LogFolder()
         {
@@ -81,10 +88,12 @@ namespace StressTest.Runtime
                 return;
             }
 
-            var now = Time.realtimeSinceStartupAsDouble;
+            var now = MonotonicClock.Now;
             if (RoundIsActive) _round.Tick(now);
             else _session.Poll(now);
             FlushManualStop();
+
+            if (_session.IsPacing && (_pacer == null || !_pacer.IsRunning)) _pacer = new SegmentPacer(_session);
 
             // 新的一段開始時記下時間，給進度條估算用
             if (_session.CurrentSegment != _progressSegment)
@@ -99,6 +108,8 @@ namespace StressTest.Runtime
             Disconnect();
             _segmentFile?.Dispose();
             _segmentFile = null;
+            _commandFile?.Dispose();
+            _commandFile = null;
             CloseRoundFiles();
         }
 
@@ -120,11 +131,13 @@ namespace StressTest.Runtime
 
             SavePreferences();
             _session = new StressTestSession(_link, _entry);
-            _session.BeginHandshake(Time.realtimeSinceStartupAsDouble);
+            _session.BeginHandshake(MonotonicClock.Now);
         }
 
         private void Disconnect()
         {
+            _pacer?.Dispose(); // 先停傳送執行緒，才能關序列埠
+            _pacer = null;
             if (RoundIsActive) _roundMessage = "連線中斷，本輪未完成。已確認的段已寫入紀錄。";
             // 停在總結畫面時中斷或關閉：先補寫每輪那一列（Finish 只在 Completed／Failed 時有效）
             FinishRound(null);
@@ -141,6 +154,7 @@ namespace StressTest.Runtime
         {
             EnsureStyles();
             HandleShortcuts();
+            if (Event.current.type == EventType.Layout) _uiState = _session?.State;
 
             var m = Px(16);
             var w = Screen.width;
@@ -264,7 +278,7 @@ namespace StressTest.Runtime
         private void DrawCurrentTask()
         {
             GUILayout.Label("現在要做的事", _small);
-            var state = _session?.State;
+            var state = _session == null ? null : _uiState;
 
             if (_session == null || state == SessionState.EntryMismatch || state == SessionState.HandshakeTimeout)
             {
@@ -352,7 +366,7 @@ namespace StressTest.Runtime
 
         private void DrawSegment()
         {
-            var state = _session?.State;
+            var state = _session == null ? null : _uiState;
 
             if (state == SessionState.RunningSegment)
             {
@@ -393,12 +407,9 @@ namespace StressTest.Runtime
         private void StartSegment()
         {
             _inputError = null;
-            var maxCount = _session.Firmware.MaxRunCount;
-            if (!int.TryParse(_countText, out var count) || count < 1 || count > maxCount)
-            {
-                _inputError = $"筆數請輸入 1～{maxCount}。";
-                return;
-            }
+            if (!int.TryParse(_countText, out var count)) count = 0;
+            _inputError = _session.Firmware.CheckSegment(_mode, count);
+            if (_inputError != null) return;
             if (!PanelSpeedInput.TryParse(_startText, out var startSpeed))
             {
                 _inputError = "目前面板速度請輸入 1.0～12.0。";
@@ -407,7 +418,7 @@ namespace StressTest.Runtime
 
             _lastResult = null;
             _readingText = "";
-            _session.RunSegment(_direction, count, GapOptions[_gapIndex], startSpeed, Time.realtimeSinceStartupAsDouble);
+            _session.StartSegment(_mode, _direction, count, GapOptions[_gapIndex], startSpeed, MonotonicClock.Now);
         }
 
         private void DrawRunningSegment()
@@ -418,6 +429,14 @@ namespace StressTest.Runtime
 
         private void DrawSegmentProgress(SegmentRun segment)
         {
+            var title = $"執行中：{DirectionLabels[(int)segment.Direction]} {segment.Count} 筆，間隔 {segment.GapMs} ms";
+            if (segment.Mode == SendMode.Ack)
+            {
+                GUILayout.Label($"{title}　已送 {segment.PcSent}、已回覆 {segment.Replies}", _body);
+                DrawProgressBar((float)segment.Replies / segment.Count);
+                return;
+            }
+
             var actionMs = 500.0;
             if (_session.Firmware.Parameters.TryGetValue("action_ms", out var text)
                 && double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var reported)
@@ -426,25 +445,24 @@ namespace StressTest.Runtime
                 actionMs = reported;
             }
             var estimate = segment.Count * (actionMs + segment.GapMs) / 1000.0;
-            var elapsed = Time.realtimeSinceStartupAsDouble - _segmentStartedAt;
+            var elapsed = MonotonicClock.Now - _segmentStartedAt;
 
-            GUILayout.Label($"執行中：{DirectionLabels[(int)segment.Direction]} {segment.Count} 筆，間隔 {segment.GapMs} ms", _body);
+            GUILayout.Label(title, _body);
+            DrawProgressBar((float)(elapsed / estimate));
+        }
+
+        private void DrawProgressBar(float fraction)
+        {
             var rect = GUILayoutUtility.GetRect(100, Px(24), GUILayout.ExpandWidth(true));
             GUI.Box(rect, GUIContent.none);
-            var filled = new Rect(rect.x, rect.y, rect.width * Mathf.Clamp01((float)(elapsed / estimate)), rect.height);
+            var filled = new Rect(rect.x, rect.y, rect.width * Mathf.Clamp01(fraction), rect.height);
             GUI.DrawTexture(filled, Texture2D.whiteTexture, ScaleMode.StretchToFill, false, 0, new Color(0.3f, 0.6f, 0.95f), 0, 0);
         }
 
         private void DrawAwaitingReading()
         {
             var segment = _session.CurrentSegment;
-
-            if (segment.ReportShort)
-            {
-                var reported = segment.TimedOut ? "逾時未回報" : $"只回報 {segment.ReportedCount} 筆";
-                GUILayout.Label($"注意：Arduino {reported}（應送 {segment.Count} 筆）。仍請輸入面板速度。", _body);
-            }
-
+            DrawReportWarning(segment);
             DrawReadingInput(segment.ExpectedEndSpeed, SubmitReading);
         }
 
@@ -517,6 +535,14 @@ namespace StressTest.Runtime
                     _segmentCsv = new SegmentCsvWriter(_segmentFile, writeHeader: true);
                 }
                 _segmentCsv.Write(result, _session.Firmware.Entry, _session.Firmware.Version, DateTime.Now);
+
+                if (_commandCsv == null)
+                {
+                    var path = _segmentCsvPath.Replace("manual_segments_", "manual_commands_");
+                    _commandFile = new StreamWriter(path, false, new UTF8Encoding(true));
+                    _commandCsv = new CommandCsvWriter(_commandFile, writeHeader: true);
+                }
+                _commandCsv.Write(result.Segment, _session.Firmware.Entry);
             }
             catch (IOException e)
             {
@@ -530,6 +556,7 @@ namespace StressTest.Runtime
             GUILayout.Label(
                 $"上一段：預期變化 {r.ExpectedChange:+0.0;-0.0} km/h，實際 {r.ActualChange:+0.0;-0.0;0.0} km/h → 推算掉包 {r.Drops} 筆",
                 _title);
+            if (r.Segment.Mode == SendMode.Ack) GUILayout.Label(HopText(r), _small);
             GUILayout.Label(
                 $"Arduino 回報 {r.Segment.ReportedCount?.ToString() ?? "無"} 筆，實際間隔平均 {r.Segment.MeanGapMicros / 1000.0:F3} ms、最大 {r.Segment.MaxGapMicros / 1000.0:F3} ms",
                 _small);

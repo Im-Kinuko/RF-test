@@ -9,7 +9,9 @@ namespace StressTest.Tests
     {
         private const string Header =
             "recorded_at,round_id,segment_index,entry,firmware_version,direction,count,gap_ms,start_speed,expected_end,actual_end," +
-            "expected_change,actual_change,drops,reported_count,report_short,timed_out,possibly_clamped,mean_gap_us,max_gap_us";
+            "expected_change,actual_change,drops,reported_count,report_short,timed_out,possibly_clamped,mean_gap_us,max_gap_us," +
+            "send_mode,pc_sent,arduino_received,arduino_executed,arduino_bad,replies,rejected,no_reply," +
+            "panel_steps,link_lost,treadmill_missing,rebooted";
 
         private static SegmentResult CompletedSegment(FakeArduino arduino, double panelEnd)
         {
@@ -34,7 +36,7 @@ namespace StressTest.Tests
             Assert.That(lines, Has.Length.EqualTo(2));
             Assert.That(lines[0], Is.EqualTo(Header));
             Assert.That(lines[1], Is.EqualTo(
-                "2026-11-22 14:05:09,,,OPTO,0.1.0,UP,20,5,1.0,3.0,2.7,2.0,1.7,3,20,0,0,0,5008.0,5008"));
+                "2026-11-22 14:05:09,,,OPTO,0.1.0,UP,20,5,1.0,3.0,2.7,2.0,1.7,3,20,0,0,0,5008.0,5008,RUN,,,,,,,,17,,3,0"));
         }
 
         [Test]
@@ -76,7 +78,7 @@ namespace StressTest.Tests
             writer.Write(result, EntryType.Opto, "0.1.0", new DateTime(2026, 11, 22, 0, 0, 0));
 
             Assert.That(output.ToString().TrimEnd(), Is.EqualTo(
-                "2026-11-22 00:00:00,,,OPTO,0.1.0,UP,20,5,1.0,3.0,1.0,2.0,0.0,20,,1,1,0,0.0,0"));
+                "2026-11-22 00:00:00,,,OPTO,0.1.0,UP,20,5,1.0,3.0,1.0,2.0,0.0,20,,1,1,0,0.0,0,RUN,,,,,,,,0,,,0"));
         }
     }
 }

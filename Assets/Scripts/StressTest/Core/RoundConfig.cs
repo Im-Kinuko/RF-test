@@ -19,6 +19,9 @@ namespace StressTest.Core
 
         public int GapMs { get; }
 
+        /// <summary>送法。正式實驗用 A；RUN 是對照組。</summary>
+        public SendMode Mode { get; set; } = SendMode.Ack;
+
         /// <summary>每段連續送出的筆數；加速段與減速段相同。</summary>
         public int N { get; }
 

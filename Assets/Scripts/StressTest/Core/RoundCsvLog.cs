@@ -11,15 +11,16 @@ namespace StressTest.Core
     /// </summary>
     public sealed class RoundCsvLog
     {
-        public const string CommandsHeader =
-            "round_id,entry,gap_ms,n,sets,segment_index,seq,direction,start_us,end_us,gap_us";
+        public const string CommandsHeader = CommandCsvWriter.Header;
 
         public const string RoundsHeader =
             "recorded_at,round_id,entry,firmware_version,firmware_params,gap_ms,n,sets,total_count,segments," +
             "total_sent,total_drops,warmup_reading,end_reading,any_possibly_clamped,any_report_short,mean_gap_us,max_gap_us," +
-            "up_planned,down_planned,up_sent,down_sent,warmup_up,warmup_down,status,void_reason";
+            "up_planned,down_planned,up_sent,down_sent,warmup_up,warmup_down," +
+            "send_mode,pc_sent,arduino_received,arduino_executed,link_lost,treadmill_missing,any_rebooted," +
+            "status,void_reason";
 
-        private readonly TextWriter _commands;
+        private readonly CommandCsvWriter _commands;
         private readonly SegmentCsvWriter _segments;
         private readonly TextWriter _rounds;
         private readonly Func<DateTime> _clock;
@@ -27,15 +28,13 @@ namespace StressTest.Core
         public RoundCsvLog(TextWriter commands, TextWriter segments, TextWriter rounds, bool writeHeaders,
             Func<DateTime> clock = null)
         {
-            _commands = commands ?? throw new ArgumentNullException(nameof(commands));
+            _commands = new CommandCsvWriter(commands, writeHeaders);
             _rounds = rounds ?? throw new ArgumentNullException(nameof(rounds));
             _segments = new SegmentCsvWriter(segments, writeHeaders);
             _clock = clock ?? (() => DateTime.Now);
 
             if (writeHeaders)
             {
-                _commands.WriteLine(CommandsHeader);
-                _commands.Flush();
                 _rounds.WriteLine(RoundsHeader);
                 _rounds.Flush();
             }
@@ -43,31 +42,7 @@ namespace StressTest.Core
 
         public void WriteSegment(string roundId, RoundConfig config, FirmwareInfo firmware, int segmentIndex, SegmentResult result)
         {
-            var c = CultureInfo.InvariantCulture;
-            var s = result.Segment;
-            long? previousEnd = null;
-
-            foreach (var t in s.Timestamps)
-            {
-                var gap = previousEnd.HasValue
-                    ? unchecked((uint)(t.StartMicros - previousEnd.Value)).ToString(c)
-                    : "";
-                _commands.WriteLine(string.Join(",",
-                    roundId,
-                    CsvFormat.Entry(firmware.Entry),
-                    config.GapMs.ToString(c),
-                    config.N.ToString(c),
-                    config.Sets.ToString(c),
-                    segmentIndex.ToString(c),
-                    t.Index.ToString(c),
-                    CsvFormat.Direction(s.Direction),
-                    t.StartMicros.ToString(c),
-                    t.EndMicros.ToString(c),
-                    gap));
-                previousEnd = t.EndMicros;
-            }
-            _commands.Flush();
-
+            _commands.Write(result.Segment, firmware.Entry, roundId, config.N, config.Sets, segmentIndex);
             _segments.Write(result, firmware.Entry, firmware.Version, _clock(), roundId, segmentIndex);
         }
 
@@ -102,6 +77,13 @@ namespace StressTest.Core
                 summary.DownSent.ToString(c),
                 summary.WarmupUpSent.ToString(c),
                 summary.WarmupDownSent.ToString(c),
+                config.Mode.Code(),
+                CsvFormat.Count(summary.PcSent),
+                CsvFormat.Count(summary.ArduinoReceived),
+                CsvFormat.Count(summary.ArduinoExecuted),
+                CsvFormat.Count(summary.LinkLost),
+                CsvFormat.Count(summary.TreadmillMissing),
+                CsvFormat.Flag(summary.AnyRebooted),
                 status,
                 CsvFormat.FreeText(voidReason)));
             _rounds.Flush();

@@ -8,7 +8,7 @@ namespace StressTest.Tests
         private const string Header = "﻿" + RoundCsvLog.RoundsHeader;
 
         private static string Row(string entry, int gap, int n, string status, int sets = 2) =>
-            $"2026-11-22 10:00:00,R,{entry},0.4.0,press_ms=120,{gap},{n},{sets},{2 * sets * n},4,120,0,2.0,2.0,0,0,5008.0,5008,60,60,60,60,11,0,{status},";
+            $"2026-11-22 10:00:00,R,{entry},0.4.0,press_ms=120,{gap},{n},{sets},{2 * sets * n},4,120,0,2.0,2.0,0,0,5008.0,5008,60,60,60,60,11,0,A,120,120,120,0,0,0,{status},";
 
         [Test]
         public void CountsOnlyCompletedRows()
@@ -31,9 +31,9 @@ namespace StressTest.Tests
         }
 
         [Test]
-        public void FindsColumnsByHeaderName_InAnyOrder()
+        public void FindsColumnsByHeaderName_InAnyOrder_AndFilesWithoutSendModeAreRun()
         {
-            var m = new ConditionMatrix(3);
+            var m = new ConditionMatrix(3) { Mode = SendMode.Burst };
 
             m.LoadRoundsCsv(new[]
             {

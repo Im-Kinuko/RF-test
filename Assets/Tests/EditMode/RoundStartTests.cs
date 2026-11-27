@@ -79,7 +79,7 @@ namespace StressTest.Tests
             var session = new StressTestSession(arduino, EntryType.Opto);
             session.BeginHandshake(0.0);
             session.Poll(0.1);
-            var round = new TestRound(session, new RoundConfig(gapMs: 5, n: 60), "R1");
+            var round = new TestRound(session, new RoundConfig(gapMs: 5, n: 60) { Mode = SendMode.Burst }, "R1");
 
             round.Start(1.0);
 

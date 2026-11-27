@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -43,6 +44,27 @@ namespace StressTest.Core
         /// <summary>預熱與重新預熱送出的單發加速／減速次數（不計分）。</summary>
         public int WarmupUpSent { get; }
         public int WarmupDownSent { get; }
+
+        /// <summary>A 送法各檢查點的整輪合計；沒有任何段、或任一段不明時為 null。</summary>
+        public int? PcSent => Total(r => r.Segment.Mode == SendMode.Ack ? r.Segment.PcSent : (int?)null);
+        public int? ArduinoReceived => Total(r => r.Segment.ArduinoReceived);
+        public int? ArduinoExecuted => Total(r => r.Segment.ArduinoExecuted);
+        public int? LinkLost => Total(r => r.LinkLost);
+        public int? TreadmillMissing => Total(r => r.TreadmillMissing);
+        public bool AnyRebooted => Results.Any(r => r.Segment.Rebooted);
+
+        private int? Total(Func<SegmentResult, int?> value)
+        {
+            if (Results.Count == 0) return null;
+            var total = 0;
+            foreach (var r in Results)
+            {
+                var v = value(r);
+                if (v == null) return null;
+                total += v.Value;
+            }
+            return total;
+        }
 
         internal static int SentCount(IEnumerable<SegmentResult> results, SegmentDirection direction) =>
             results.Where(r => r.Segment.Direction == direction).Sum(r => r.Segment.ReportedCount ?? 0);

@@ -11,7 +11,7 @@ namespace StressTest.Tests
         /// <param name="n">每段筆數；流程測試固定用 20，與正式的 30／60／90 無關。</param>
         /// <param name="sets">組數；預設 1 組（加速、減速各一段）讓流程測試短一點。</param>
         public RoundHarness(int gapMs = 5, int n = 20, int sets = 1, FakeArduino arduino = null, RoundCsvLog log = null,
-            double? bootSpeed = null, double baseSpeed = 1.0)
+            double? bootSpeed = null, double baseSpeed = 1.0, SendMode mode = SendMode.Burst)
         {
             Arduino = arduino ?? new FakeArduino();
             Session = new StressTestSession(Arduino, EntryType.Opto);
@@ -19,7 +19,8 @@ namespace StressTest.Tests
             Session.Poll(0.1);
             var config = new RoundConfig(gapMs, n, sets, baseSpeed, bootSpeed ?? baseSpeed)
             {
-                IgnoredWarmupPresses = 0 // 多補的那一下另有專門測試
+                IgnoredWarmupPresses = 0, // 多補的那一下另有專門測試
+                Mode = mode
             };
             Round = new TestRound(Session, config, "R1", log);
             Now = 1.0;

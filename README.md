@@ -2,9 +2,11 @@
 
 這個 Unity 專案用來比較跑步機的兩種控制方式：光耦（V1，模擬按壓面板按鍵）和 433 MHz RF（V2，走原廠遙控通道）。測試時連續送出加速、減速指令，改變每筆指令之間的休息間隔，觀察哪一種方式在哪個間隔開始掉包。
 
-Unity 送出測試指令給 Arduino，Arduino 用毫秒級的間隔連續送出。每送完一段，研究人員看跑步機面板、輸入速度，工具就推算出這段漏了幾筆，結果全部寫成 CSV。
+Unity 送出測試指令給 Arduino（A 送法逐筆送；RUN 對照由 Arduino 自己連續送）。每送完一段，研究人員看跑步機面板、輸入速度，工具就推算出各段漏了幾筆，結果全部寫成 CSV。
 
 > 研究背景：研究問題一，「在相同加減速指令與不同發送間隔下，兩個控制入口能否正確輸出」。外部遙控器監聽（研究問題二）不在本專案範圍內。
+>
+> **實驗設計**（目的、檢查點、三種送法、判讀與前測）以 [Docs/ExperimentDesign.md](Docs/ExperimentDesign.md) 為準。目前實作了 **A 等回覆**（電腦逐筆送）與 **RUN 對照**（Arduino 自己連續送）；B 固定間隔、C 原版重現尚未實作。
 
 ![介面](Docs/screenshots/ui/05_idle.png)
 
@@ -36,18 +38,19 @@ Unity 送出測試指令給 Arduino，Arduino 用毫秒級的間隔連續送出�
 |---|---|
 | 控制入口 | 光耦、RF |
 | 休息間隔 | 0／1／5／10 ms，從上一筆動作**完成後**開始計時 |
-| 每段筆數 n | 30／60／90 筆，一段由 Arduino 連續送完，中間不停 |
+| 送法 | **A 等回覆**：電腦逐筆送，收到完成回覆後等 gap 再送下一筆。**RUN 對照**：Arduino 自己連續送完整段。右側面板切換，進度分開記 |
+| 每段筆數 n | 30／60／90 筆 |
 | 一輪的組成 | 加速 n → 減速 n → 加速 n → 減速 n，也就是 2 組，共 4n 筆（120／240／360） |
 | 速度範圍 | 跑步機開機與最低速度都是 1.0 km/h；預熱到 2.0 後，在 2.0 和 2.0 + n × 0.1 之間來回（n=30 到 5.0、n=60 到 8.0、n=90 到 11.0），每次按鍵 ±0.1 km/h |
 | 加減速次數 | 加速、減速各 2n 次。畫面和每輪 CSV 都會記下預計與實際送出的次數 |
 | 重複次數 | 每個條件 3 輪（可調） |
-| 條件總數 | 4 種間隔 × 3 種 n × 2 種入口 = 24 個條件，共 72 輪 |
+| 條件總數 | 每種送法 4 種間隔 × 3 種 n × 2 種入口 = 24 個條件，共 72 輪 |
 
 **一輪的流程**
 1. 送出「啟動」，倒數 5 秒，等跑帶穩定。
 2. 預熱：每秒加速 1 次，共 11 次，把速度從開機的 1.0 km/h 帶到 2.0 km/h。這段不計分。1.0 到 2.0 是 10 格，但實機上啟動後只送 10 次會停在 1.9，所以多送 1 次。起點設在 2.0，是為了和最低速度 1.0 之間留 10 筆的餘裕：加速段漏掉的筆數在 10 筆以內時，接下來的減速段才不會撞到底。
 3. 研究人員確認面板顯示 2.0。如果不是 2.0，可以選「重新預熱」（用單發補足差額，不計分），或「以實際速度為起點繼續」。
-4. 依序跑 4 段：加速 n、減速 n、加速 n、減速 n。每段由 Arduino 連續送 n 筆，送完後研究人員輸入面板速度，確認後進入下一段。
+4. 依序跑 4 段：加速 n、減速 n、加速 n、減速 n。每段送完 n 筆後研究人員輸入面板速度，確認後進入下一段。
 5. 送出「停止」，顯示本輪總結。
 
 單筆動作沿用正式版本的設定：
@@ -94,13 +97,13 @@ Unity 送出測試指令給 Arduino，Arduino 用毫秒級的間隔連續送出�
 | | D6 | 啟動 |
 | `StressTest_RF` | D10 | RF 發射（TX） |
 
-> 韌體 v0.4.0 把每段上限從 32 筆提高到 90 筆。**兩塊板子都要重新燒錄**；舊韌體連得上，但程式會拒絕開始 n > 32 的輪次。
+> 韌體 v0.5.0 加入 A 送法需要的 `ZERO`、`CMD`、`STAT`。**兩塊板子都要重新燒錄**；舊韌體連得上，但程式會拒絕開始 A 送法的輪次。
 
 **燒錄設定**
 - 開發板選「Arduino Nano」，處理器選「ATmega328P」。上傳失敗的話改選「ATmega328P (Old Bootloader)」。
 - 序列埠 baud 是 **115200**。燒錄完成後，用序列埠監控視窗（行尾選「Newline」）應該會看到：
-  - 光耦版：`READY,OPTO,0.4.0,press_ms=120;action_ms=120;max_run=90`
-  - RF 版：`READY,RF,0.4.0,bits=24;repeat=2;release_ms=250;action_ms=340;max_run=90`
+  - 光耦版：`READY,OPTO,0.5.0,press_ms=120;action_ms=120;max_run=90;ack=1`
+  - RF 版：`READY,RF,0.5.0,bits=24;repeat=2;release_ms=250;action_ms=340;max_run=90;ack=1`
 - **燒錄完記得關掉序列埠監控視窗**，否則 Unity 連線時會顯示「被其他程式占用」。
 
 ---
@@ -167,7 +170,7 @@ Unity 送出測試指令給 Arduino，Arduino 用毫秒級的間隔連續送出�
 
 **怎麼看**
 - 燈號先變**黃色**，顯示「等待韌體回報身分…」，大約 2 秒。這是 Nano 正在重開機，屬於正常現象。
-- 接著變**綠色**，顯示「已連線：光耦韌體 v0.4.0」（或 RF），下方小字是韌體參數。**看到綠燈就成功了**，畫面會變成步驟 3 的樣子。
+- 接著變**綠色**，顯示「已連線：光耦韌體 v0.5.0」（或 RF），下方小字是韌體參數。**看到綠燈就成功了**，畫面會變成步驟 3 的樣子。
 
 **連不上時：**
 
@@ -183,10 +186,10 @@ Unity 送出測試指令給 Arduino，Arduino 用毫秒級的間隔連續送出�
 
 ![已連線、閒置](Docs/screenshots/ui/05_idle.png)
 
-**做什麼**：先看清楚左邊寫的條件，確認無誤後按綠色的「**開始下一輪**」。
+**做什麼**：先在右側面板最上方選送法（**A 等回覆**是正式實驗，**RUN 對照**是對照組），看清楚左邊寫的條件，確認無誤後按綠色的「**開始下一輪**」。
 
 **看哪裡**：左邊「現在要做的事」由上往下有四行：
-1. 大字「**下一輪：光耦、間隔 1 ms、n = 30**」：這一輪的入口、間隔、每段筆數。
+1. 大字「**下一輪（A）：光耦、間隔 1 ms、n = 30**」：這一輪的送法、入口、間隔、每段筆數。
 2. 「**（加速 30、減速 30）× 2 組＝共 120 筆，分 4 段**」：這一輪的組成。
 3. 「第 1 輪……預熱加速 11 次到 2.0 後開始計分（2.0↔5.0）」：這是同一個條件的第幾輪，以及速度會在什麼範圍內來回。
 4. 小字「依整體排程下一輪輪到 RF；也可以先繼續用光耦」：照整體排程該換板子時，才會出現這一行。
@@ -255,12 +258,13 @@ Unity 送出測試指令給 Arduino，Arduino 用毫秒級的間隔連續送出�
 
 ![段執行中](Docs/screenshots/ui/11_round_running_segment.png)
 
-**做什麼**：**什麼都不要按。** Arduino 正在用設定好的間隔，連續送出這一段的 n 筆指令。n = 90 時，光耦一段約 11 秒，RF 約 31 秒。
+**做什麼**：**什麼都不要按。** 這一段的 n 筆指令正在送出。n = 90 時，光耦一段約 11 秒以上，RF 約 31 秒以上。A 送法執行期間程式會占滿一個 CPU 核心，這是正常的；請不要同時跑其他吃資源的程式。
 
-**看哪裡**：左邊上方「本輪：間隔 1 ms、n = 30（共 120 筆）　**段 1／4**」，代表現在是第幾段、總共幾段；大字「**執行中：加速 30 筆**」；以及藍色進度條。
+**看哪裡**：左邊上方「本輪（A）：間隔 1 ms、n = 30（共 120 筆）　**段 1／4**」；大字「**執行中：加速 30 筆**」；以及藍色進度條。A 送法另外顯示「已送 k、已回覆 r」。
 
 **怎麼看**
-- 進度條是**預估**的時間，跑滿之前畫面就可能先換掉，這是正常的。
+- A 送法的進度條是實際回覆數；RUN 對照的進度條是**預估**時間，跑滿之前畫面就可能先換掉。
+- A 送法中「已回覆」停住超過幾秒，代表有指令沒有回覆，程式會在逾時後繼續；連續 3 筆沒回覆就結束這一段。
 - 這時跑步機面板的速度會一路往上加（或往下減）。
 - 有異狀就按**空白鍵**緊急停止。
 
@@ -297,6 +301,8 @@ Unity 送出測試指令給 Arduino，Arduino 用毫秒級的間隔連續送出�
   - **實際變化**：面板實際變了多少。
   - **Arduino 回報**：Arduino 說它真的送出了幾筆。
 
+- A 送法多一行各檢查點的筆數：「電腦送 30 → Arduino 收 30 → 執行 30 → 面板 27 格（序列端少 0、跑步機端少 3）」。這行指出掉在哪一段。
+
 **怎麼看**
 - **Arduino 回報 30 筆，但掉包 3 筆**：Arduino 確實送出了 30 筆，跑步機只反應了 27 筆，這就是**跑步機那一端的掉包**，正是這個實驗要量的東西。
 - 出現粗體的旗標（見下圖），代表這一段的掉包數**不可信**：
@@ -306,7 +312,9 @@ Unity 送出測試指令給 Arduino，Arduino 用毫秒級的間隔連續送出�
   | 旗標 | 意思 | 建議 |
   |---|---|---|
   | 「**可能觸底／觸頂**」 | 理論終點超出 1.0～12.0，多出來的指令被跑步機吃掉了 | 記下來，結束後考慮作廢這一輪 |
-  | 「**Arduino 回報不足**」 | Arduino 回報的筆數比應送的少，問題可能在電腦或序列埠，不一定是跑步機 | 對照錄影，考慮作廢 |
+  | 「**Arduino 回報不足**」（RUN） | Arduino 回報的筆數比應送的少，問題可能在電腦或序列埠，不一定是跑步機 | 對照錄影，考慮作廢 |
+  | 「**有指令沒有完成往返**」（A） | 有指令遺失、毀損或沒回覆 | **這是要收集的資料，不要因此作廢** |
+  | 「**Arduino 在這段中重新開機**」 | 執行中板子重開 | 檢查供電，記下發生情況 |
 
 ---
 
@@ -331,7 +339,7 @@ Unity 送出測試指令給 Arduino，Arduino 用毫秒級的間隔連續送出�
 **做什麼**
 1. 確認跑步機的**跑帶已經完全停下來**。最後一段結束後，系統會自動送出停止指令。
 2. 結果沒問題：按綠色的「**跑帶已停止，回到設定**」。
-3. 結果有問題，例如有段出現旗標、看錯面板、中途有人碰到跑步機：在「作廢原因」欄寫下原因，按「**作廢此輪**」。
+3. 結果有問題，例如看錯面板、中途有人碰到跑步機、板子重開機、出現「可能觸底／觸頂」：在「作廢原因」欄寫下原因，按「**作廢此輪**」。A 送法的「有指令沒有完成往返」是要收集的資料，不要因此作廢。
 
    ![作廢此輪](Docs/screenshots/ui/15_round_void_reason.png)
 
@@ -379,7 +387,7 @@ Unity 送出測試指令給 Arduino，Arduino 用毫秒級的間隔連續送出�
 
 **用途**
 - **單發測試**：按「啟動」「加速」「減速」「停止」，各送一次指令，用來確認接線和跑步機有沒有反應。例如按「加速」，面板應該 +0.1。
-- **手動單段**：自己選方向（加速／減速）、間隔、筆數（1～90），再填「目前面板速度」，按「跑一段」。之後的流程和步驟 7～9 一樣。
+- **手動單段**：自己選方向（加速／減速）、間隔（0 ms～1 s）、筆數，再填「目前面板速度」，按「跑一段」。送法跟右側面板的選擇一致；筆數上限 A 為 300、RUN 為 90。之後的流程和步驟 7～9 一樣。
 
 手動工具的結果另外存在 `manual_segments_*.csv`，**不計入矩陣進度**，可以放心拿來前測或排除問題。
 
@@ -400,6 +408,7 @@ Unity 送出測試指令給 Arduino，Arduino 用毫秒級的間隔連續送出�
 | [`segments_*.csv`](#segments每一段) | 一段（加速 n 或減速 n） | 同上 |
 | [`rounds_*.csv`](#rounds每一輪) | 一輪 | 在總結畫面或中斷畫面按按鈕離開時 |
 | [`manual_segments_*.csv`](#manual_segments手動單段) | 手動工具跑的一段 | 輸入手動段的讀數時 |
+| `manual_commands_*.csv` | 手動段的一筆指令 | 同上 |
 
 哪些情況**不會**留下紀錄：
 - 被緊急停止打斷、或還沒確認讀數的段，不寫入 `commands_*.csv` 和 `segments_*.csv`。
@@ -415,13 +424,14 @@ Unity 送出測試指令給 Arduino，Arduino 用毫秒級的間隔連續送出�
 | `entry` | `OPTO`（光耦）或 `RF` |
 | `direction` | `UP`（加速）或 `DOWN`（減速） |
 | `segment_index` | 輪內第幾段，**從 0 起算**：0＝第 1 組加速、1＝第 1 組減速、2＝第 2 組加速、3＝第 2 組減速 |
-| `round_id` | `日期-時間-入口-G間隔-Nn`，例如 `20261127-143000-OPTO-G5-N60`。三份檔案用它互相對應 |
+| `round_id` | `日期-時間-入口-送法-G間隔-Nn`，例如 `20261127-143000-OPTO-A-G5-N60`。三份檔案用它互相對應 |
+| `send_mode` | `A`（等回覆）或 `RUN`（對照） |
 | `recorded_at` | 寫入這一列時的電腦時間（`yyyy-MM-dd HH:mm:ss`） |
 | 空白 | 代表沒有這個值（各欄說明會寫什麼情況下空白） |
 
 ### commands：逐筆指令
 
-用途：檢查 Arduino 是否真的照設定的間隔送出指令。這份檔案**看不出跑步機有沒有收到**某一筆。
+用途：看每一筆指令走到哪裡，以及實際間隔。A 送法**每送出一筆就有一列**（沒有回覆的也有）；RUN 對照只有 Arduino 回報時間戳的筆。這份檔案**看不出跑步機有沒有收到**某一筆。
 
 | 欄位 | 意思 |
 |---|---|
@@ -435,11 +445,19 @@ Unity 送出測試指令給 Arduino，Arduino 用毫秒級的間隔連續送出�
 | `direction` | 這一筆是加速還是減速 |
 | `start_us` | 這一筆動作開始時 Arduino 的 `micros()` |
 | `end_us` | 這一筆動作結束時的 `micros()`。光耦是腳位拉回 LOW 之後；RF 是發射完再等完 250 ms 釋放時間之後 |
-| `gap_us` | 實際休息時間＝本筆 `start_us` − 上一筆 `end_us`。每段第一筆空白 |
+| `gap_us` | 實際休息時間＝本筆 `start_us` − 上一筆 `end_us`。每段第一筆，以及前一筆沒有時間戳時空白 |
+| `send_mode` | 送法 |
+| `cmd_seq` | A：協定上的指令序號，連線期間一直遞增。RUN 空白 |
+| `status` | A：`done`（期限內回覆）、`late`（逾時後才回覆）、`rejected`（Arduino 回報行毀損）、`no_reply`（沒有回覆）、`pending`（段在回覆前就結束，例如重新開機）。RUN 空白 |
+| `pc_send_us` | A：電腦送出的時間（電腦時鐘，µs，程式啟動起算） |
+| `pc_reply_us` | A：電腦收到完成回覆的時間；沒有回覆時空白。`pc_reply_us − pc_send_us` 是往返時間 |
+| `rx_us` | A：Arduino 讀完這行指令時的 `micros()` |
 
 - `end_us − start_us` 是單筆動作耗時：光耦約 120000，RF 約 340000（推算值，以實測為準）。
 - `micros()` 從 Arduino 開機起算，約 71.6 分鐘歸零一次。`gap_us` 已經處理歸零；自己用 `start_us`、`end_us` 相減時，遇到負值要加上 4294967296。
-- 段逾時的段沒有任何逐筆列；Arduino 回報不足的段只有實際回報的那幾筆。
+- RUN 對照中，段逾時的段沒有任何逐筆列；Arduino 回報不足的段只有實際回報的那幾筆。
+- A 送法沒有回覆的列，`start_us`、`end_us`、`rx_us` 空白。
+- 電腦時鐘和 Arduino 的 `micros()` 沒有同步，兩者不能直接相減。
 
 ### segments：每一段
 
@@ -461,12 +479,26 @@ Unity 送出測試指令給 Arduino，Arduino 用毫秒級的間隔連續送出�
 | `expected_change` | 預期變化量，加速為正、減速為負：±`count` × 0.1 | 計算 |
 | `actual_change` | 實際變化量＝`actual_end` − `start_speed` | 計算 |
 | `drops` | 推算掉包數＝\|`expected_change` − `actual_change`\| ÷ 0.1，四捨五入。判讀限制見[掉包怎麼算](#掉包怎麼算) | 計算 |
-| `reported_count` | Arduino 回報實際送出的筆數；段逾時時空白 | 韌體回報 |
-| `report_short` | `1`＝逾時，或回報筆數、時間戳筆數少於 `count` | 判定 |
-| `timed_out` | `1`＝期限內沒收到 `DONE` | 判定 |
+| `reported_count` | Arduino 回報實際執行的筆數。RUN：`DONE` 的筆數，段逾時時空白。A：`STAT` 的執行數，問不到時用完成回覆數 | 韌體回報 |
+| `report_short` | `1`＝逾時、重新開機，或回報筆數、時間戳筆數少於 `count`。A 送法中代表有指令沒有完成往返，是結果不是排除條件 | 判定 |
+| `timed_out` | RUN：`1`＝期限內沒收到 `DONE`。A：`1`＝連續 3 筆沒有回覆而提早結束 | 判定 |
 | `possibly_clamped` | `1`＝`expected_end` 低於 1.0 或高於 12.0，這段的 `drops` 不可信 | 判定 |
 | `mean_gap_us` | 這段實際休息時間的平均（一位小數）；時間戳少於 2 筆時為 `0.0` | 時間戳 |
 | `max_gap_us` | 這段實際休息時間的最大值；時間戳少於 2 筆時為 `0` | 時間戳 |
+| `send_mode` | 送法 | 系統 |
+| `pc_sent` | A：電腦實際送出的指令數 | 電腦 |
+| `arduino_received` | A：Arduino 通過檢查碼的指令數；`STAT` 問不到時空白 | 韌體回報 |
+| `arduino_executed` | A：Arduino 做完動作的指令數 | 韌體回報 |
+| `arduino_bad` | A：Arduino 收到的毀損、過長或不認得的行數 | 韌體回報 |
+| `replies` | A：電腦收到的完成回覆數（含遲到） | 電腦 |
+| `rejected` | A：狀態為 `rejected` 的筆數 | 電腦 |
+| `no_reply` | A：狀態為 `no_reply` 的筆數 | 電腦 |
+| `panel_steps` | 面板往指令方向移動的格數（0.1 km/h 一格），往反方向為負 | 計算 |
+| `link_lost` | A：`pc_sent` − `arduino_received`（電腦到 Arduino 掉的筆數） | 計算 |
+| `treadmill_missing` | 執行數 − `panel_steps`（Arduino 之後掉的筆數，負值是多反應）。A 用 `arduino_executed`，RUN 用 `reported_count` | 計算 |
+| `rebooted` | `1`＝這段執行中 Arduino 重新開機 | 判定 |
+
+RUN 對照的 `pc_sent`、`arduino_*`、`replies`、`rejected`、`no_reply`、`link_lost` 空白。
 
 ### rounds：每一輪
 
@@ -498,6 +530,13 @@ Unity 送出測試指令給 Arduino，Arduino 用毫秒級的間隔連續送出�
 | `down_sent` | 已確認減速段中，Arduino 回報實際送出的次數（逾時段算 0） |
 | `warmup_up` | 預熱與重新預熱中，Arduino 已回覆的單發加速次數。正常是 11（含跑步機沒有反應的 1 次），不計分 |
 | `warmup_down` | 重新預熱中的單發減速次數，正常是 0，不計分 |
+| `send_mode` | 送法 |
+| `pc_sent` | A：各段 `pc_sent` 合計 |
+| `arduino_received` | A：各段合計；任一段不明時空白 |
+| `arduino_executed` | A：各段合計；任一段不明時空白 |
+| `link_lost` | A：各段合計；任一段不明時空白 |
+| `treadmill_missing` | 各段合計（含有旗標的段）；任一段不明時空白 |
+| `any_rebooted` | `1`＝至少一段重新開機 |
 | `status` | `completed`（可分析）或 `voided`（作廢：手動作廢、緊急停止、中途失敗） |
 | `void_reason` | 作廢原因；`completed` 時空白。原因裡的半形逗號會改成全形 |
 
@@ -505,15 +544,17 @@ Unity 送出測試指令給 Arduino，Arduino 用毫秒級的間隔連續送出�
 
 欄位與 `segments_*.csv` 完全相同，但 `round_id` 和 `segment_index` 空白，`start_speed` 是手動填入的「目前面板速度」。這些資料不計入矩陣進度。
 
+`manual_commands_*.csv` 的欄位與 `commands_*.csv` 相同，`round_id`、`sets`、`segment_index` 空白，`n` 是這一段填的筆數。
+
 ### 整理論文用的掉包表
 
-建議用 `segments_*.csv`，因為它能分開加速和減速，也能排除不可信的段。
+建議用 `segments_*.csv`，因為它能分開加速和減速，也能排除不可信的段。分析原則見[實驗設計第 8 節](Docs/ExperimentDesign.md#8-資料與分析)。
 
 1. 把所有 `rounds_*.csv` 合併，篩出 `status = completed` 的 `round_id`。
 2. 把所有 `segments_*.csv` 合併，只留下 `round_id` 在上一步清單裡的列。
-3. 排除 `possibly_clamped = 1` 或 `report_short = 1` 的列，並記下排除了幾段。
-4. 建立樞紐分析表：列放 `entry`、`gap_ms`，欄放 `direction`，值放 `drops` 和 `count` 的加總。要看 n 的影響時，把 `count` 放到篩選或欄位。
-5. 掉包率 = `drops` 加總 ÷ `count` 加總。
+3. 跑步機端指標（`drops`、`treadmill_missing`）排除 `possibly_clamped = 1` 的列；RUN 對照另外排除 `report_short = 1`。A 的鏈路端指標（`link_lost`、`rejected`、`no_reply`）不排除。記下排除了幾段。
+4. 建立樞紐分析表：列放 `send_mode`、`entry`、`gap_ms`，欄放 `direction`，值放 `link_lost`、`treadmill_missing`、`drops` 和 `count` 的加總。要看 n 的影響時，把 `count` 放到篩選或欄位。
+5. 各指標分別除以分母並保留各輪的數字：`link_lost` ÷ `pc_sent`；`treadmill_missing` ÷ `arduino_executed`（RUN 用 `reported_count`）。`drops` 以計畫的 n 計算，只有 `pc_sent`＝`count` 的 A 段才能使用。
 
 詳細步驟見 [BenchAcceptance.md 的 F 節](Docs/BenchAcceptance.md#f-紀錄檔)。
 
@@ -532,17 +573,17 @@ Unity 送出測試指令給 Arduino，Arduino 用毫秒級的間隔連續送出�
 
 公式取絕對值，所以面板變化**比預期多**（例如一筆指令被跑步機算成兩次，或按住被當成長按連續加速）也會算進 `drops`。要分辨兩者，比較 `|actual_change|` 和 `|expected_change|`：小於是漏反應，大於是多反應。
 
-休息間隔 `gap_ms` 是從上一筆**動作結束**起算。RF 的單筆動作本身包含 250 ms 釋放時間，所以 RF 兩次發射之間的空檔大約是 250 ms + `gap_ms`；光耦兩次按壓之間腳位為 LOW 的時間就是 `gap_ms`。論文比較兩個入口時需要交代這個差別。
+休息間隔 `gap_ms` 在 RUN 對照是從上一筆**動作結束**起算；A 送法是從**電腦收到完成回覆**起算，實際空檔還要加上序列往返時間，以 `gap_us` 為準。RF 的單筆動作本身包含 250 ms 釋放時間，所以 RF 兩次發射之間的空檔是 250 ms 再加上述空檔；光耦兩次按壓之間腳位為 LOW 的時間就是上述空檔。論文比較兩個入口時需要交代這個差別。
 
 段結果的旗標：
 
 | 旗標 | 意思 |
 |---|---|
 | `possibly_clamped`（可能觸底／觸頂） | 起點加上預期變化後超出 1.0～12.0 km/h（跑步機最低 1.0），多出來的指令會被跑步機吃掉，這段推算出來的掉包數不可信。 |
-| `report_short`（回報不足） | Arduino 回報的筆數少於應送筆數，或逾時沒有回報。問題可能出在序列埠或韌體，不一定是跑步機掉包。 |
-| `timed_out` | 在「筆數 ×（單筆動作時間 + 間隔）× 2 + 2 秒」內沒有收到 `DONE`。 |
+| `report_short`（回報不足） | 回報的筆數少於應送筆數、逾時或重開機。RUN：問題可能出在序列埠或韌體。A：有指令沒有完成往返，是掉包資料。 |
+| `timed_out` | RUN：在「筆數 ×（單筆動作時間 + 間隔）× 2 + 2 秒」內沒有收到 `DONE`。A：連續 3 筆沒有準時回覆。 |
 
-Arduino 用 `micros()` 記錄每一筆的開始和結束時間。這些時間戳會先存在 RAM，等整段跑完才一次回傳；執行期間 Arduino 不會輸出任何序列資料，避免傳輸時間把間隔拉長。
+Arduino 用 `micros()` 記錄每一筆的開始和結束時間。RUN 對照先把時間戳存在 RAM，整段跑完才一次回傳，執行期間不輸出任何序列資料，避免傳輸時間把間隔拉長；A 送法每做完一筆就回覆一行。
 
 ---
 
@@ -559,7 +600,7 @@ Arduino 用 `micros()` 記錄每一筆的開始和結束時間。這些時間戳
 & "<Unity 安裝路徑>\6000.6.10f1\Editor\Unity.exe" -batchmode -projectPath . -runTests -testPlatform EditMode -testResults results.xml -logFile unity.log
 ```
 
-目前共有 117 個 EditMode 測試。其中 115 個核心流程測試在 Unity 之外用 .NET 8 跑過、全部通過；2 個專案設定測試需要在 Unity 內執行。
+目前共有 153 個 EditMode 測試。其中 151 個核心流程測試在 Unity 之外用 .NET 8 跑過、全部通過；2 個專案設定測試需要在 Unity 內執行。
 
 ### 建置 Windows 執行檔
 
@@ -596,7 +637,10 @@ Assets/
   Scenes/StressTest.unity     測試場景（按 Play 即可）
   Scripts/StressTest/
     Core/                     純 C#：協定、一輪狀態機、判定、矩陣、CSV
-      StressTestSession.cs    與韌體交談：握手、單發、RUN、ABORT
+      StressTestSession.cs    與韌體交談：握手、單發、RUN、ABORT、逐筆段
+      PacedSender.cs          A 送法：ZERO、逐筆 CMD、STAT 與逾時
+      LineChecksum.cs         逐筆協定的行檢查碼
+      CommandCsvWriter.cs     逐筆指令 CSV
       TestRound.cs            一輪流程：啟動→預熱→各段→停止→總結
       RoundPlan.cs            （加速 n、減速 n）× 2 組的段計畫
       SegmentResult.cs        掉包數與觸底／觸頂旗標
@@ -605,12 +649,14 @@ Assets/
       PanelSpeedInput.cs      面板速度輸入解析
     Runtime/                  Unity 介面（OnGUI）與序列埠
       SerialPortLink.cs       ISerialLink 的正式實作
+      SegmentPacer.cs         A 送法的高頻收送執行緒
       StressTestRunner*.cs    三區版面、輪次畫面、矩陣、樣式、版面導覽
       SimulatedArduino.cs     模擬韌體（只供版面導覽截圖用）
     Editor/StressTestBuild.cs batchmode 建置腳本
-  Tests/EditMode/             FakeArduino 與 117 個測試
+  Tests/EditMode/             FakeArduino 與 153 個測試
 Docs/
-  StressTest-Spec.md          規格
+  ExperimentDesign.md         實驗設計（目前的依據）
+  StressTest-Spec.md          原始規格
   BenchAcceptance.md          台架驗收與前測清單
   UI-Screens.md               所有畫面的截圖與說明
   screenshots/                版面截圖
@@ -629,6 +675,9 @@ Docs/
 | `ONE,<START\|UP\|DOWN\|STOP>` | 單發一次 |
 | `RUN,<UP\|DOWN>,<n>,<gap_ms>` | 連續送 n 筆（n ≤ 90）；每筆動作完成後休息 gap_ms 毫秒 |
 | `ABORT` | 中止執行中的 RUN |
+| `ZERO` | 逐筆計數歸零（A 送法每段開始時） |
+| `CMD,<seq>,<UP\|DOWN>*XX` | 逐筆指令：做一筆，做完回 `X` |
+| `STAT` | 查詢逐筆計數 |
 
 | Arduino → Unity | 意義 |
 |---|---|
@@ -638,6 +687,11 @@ Docs/
 | `DONE,<n>` | RUN 完成 |
 | `ABORTED,<n>` | RUN 被中止，n 為中止前已完成的筆數 |
 | `ERR,<原因>` | 例如 `BAD_COMMAND`、`BAD_RUN`、`BUSY`（RUN 執行期間收到其他指令）、`UNKNOWN` |
+| `X,<seq>,<rx_us>,<start_us>,<end_us>*XX` | 逐筆指令的完成回覆 |
+| `NAK,BAD_LINE*XX` | `CMD` 行毀損，沒有執行 |
+| `STAT,<收到>,<執行>,<毀損>*XX` | 回應 `STAT` |
+
+`*XX` 是 `*` 之前所有位元組 XOR 的兩位大寫十六進位，例如 `CMD,1,UP*7E`。
 
 ---
 
@@ -655,8 +709,9 @@ Docs/
 
 | 部分 | 狀態 |
 |---|---|
-| 核心流程、介面、CSV、條件矩陣、緊急停止 | 完成；115 個核心測試通過，尚未在 Unity 6000.6.10f1 內重跑 |
-| 兩支韌體（v0.4.0） | 已用 avr-gcc 編譯通過，**尚未燒錄實測** |
+| A 送法、RUN 對照、CSV、條件矩陣、緊急停止 | 完成；151 個核心測試通過，尚未在 Unity 6000.6.10f1 內重跑 |
+| B 固定間隔、C 原版重現、輸出端量測 | 未實作 |
+| 兩支韌體（v0.5.0） | 已用 avr-gcc 編譯通過，**尚未燒錄實測** |
 | 台架驗收與前測 | 清單已完成，**等待接上硬體執行** |
 | 畫面截圖 | 舊版設計拍的，改版後尚未重拍（重拍方法見 [Docs/UI-Screens.md](Docs/UI-Screens.md) 文末） |
 
@@ -664,7 +719,9 @@ Docs/
 
 ## 相關文件
 
-- [Docs/StressTest-Spec.md](Docs/StressTest-Spec.md)：完整規格，包含使用者故事、實作決策、測試策略
+- [Docs/ExperimentDesign.md](Docs/ExperimentDesign.md)：實驗設計
+- [Docs/research/burst-stress-test-design.md](Docs/research/burst-stress-test-design.md)：送法設計的研究筆記
+- [Docs/StressTest-Spec.md](Docs/StressTest-Spec.md)：原始規格，包含使用者故事、實作決策、測試策略
 - [Docs/UI-Screens.md](Docs/UI-Screens.md)：所有畫面的截圖與說明
 - [Docs/BenchAcceptance.md](Docs/BenchAcceptance.md)：台架驗收與前測的逐項清單
 - [.scratch/stress-test/issues/](.scratch/stress-test/issues/)：每張開發票的驗收項目與完成紀錄

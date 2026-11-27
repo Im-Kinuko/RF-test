@@ -1,6 +1,7 @@
 using System;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 
 namespace StressTest.Core
 {
@@ -13,7 +14,9 @@ namespace StressTest.Core
     {
         public const string Header =
             "recorded_at,round_id,segment_index,entry,firmware_version,direction,count,gap_ms,start_speed,expected_end,actual_end," +
-            "expected_change,actual_change,drops,reported_count,report_short,timed_out,possibly_clamped,mean_gap_us,max_gap_us";
+            "expected_change,actual_change,drops,reported_count,report_short,timed_out,possibly_clamped,mean_gap_us,max_gap_us," +
+            "send_mode,pc_sent,arduino_received,arduino_executed,arduino_bad,replies,rejected,no_reply," +
+            "panel_steps,link_lost,treadmill_missing,rebooted";
 
         private readonly TextWriter _output;
 
@@ -32,6 +35,7 @@ namespace StressTest.Core
         {
             var s = result.Segment;
             var c = CultureInfo.InvariantCulture;
+            var paced = s.Mode == SendMode.Ack;
             var fields = new[]
             {
                 CsvFormat.Time(recordedAt),
@@ -53,7 +57,19 @@ namespace StressTest.Core
                 CsvFormat.Flag(s.TimedOut),
                 CsvFormat.Flag(result.PossiblyClamped),
                 s.MeanGapMicros.ToString("F1", c),
-                s.MaxGapMicros.ToString(c)
+                s.MaxGapMicros.ToString(c),
+                s.Mode.Code(),
+                paced ? s.PcSent.ToString(c) : "",
+                CsvFormat.Count(s.ArduinoReceived),
+                CsvFormat.Count(s.ArduinoExecuted),
+                CsvFormat.Count(s.ArduinoBad),
+                paced ? s.Replies.ToString(c) : "",
+                paced ? s.Commands.Count(x => x.Status == CommandStatus.Rejected).ToString(c) : "",
+                paced ? s.Commands.Count(x => x.Status == CommandStatus.NoReply).ToString(c) : "",
+                result.PanelSteps.ToString(c),
+                CsvFormat.Count(result.LinkLost),
+                CsvFormat.Count(result.TreadmillMissing),
+                CsvFormat.Flag(s.Rebooted)
             };
             _output.WriteLine(string.Join(",", fields));
             _output.Flush();
@@ -69,6 +85,19 @@ namespace StressTest.Core
         public static string Speed(double v) => v.ToString("F1", CultureInfo.InvariantCulture);
         public static string Speed(double? v) => v.HasValue ? Speed(v.Value) : "";
         public static string Flag(bool b) => b ? "1" : "0";
+        public static string Count(int? v) => v?.ToString(CultureInfo.InvariantCulture) ?? "";
+
+        public static string Status(CommandStatus status)
+        {
+            switch (status)
+            {
+                case CommandStatus.Done: return "done";
+                case CommandStatus.Late: return "late";
+                case CommandStatus.Rejected: return "rejected";
+                case CommandStatus.NoReply: return "no_reply";
+                default: return "pending";
+            }
+        }
 
         /// <summary>研究人員輸入的文字：半形逗號換成全形、換行換成空白，避免破壞 CSV 欄位。</summary>
         public static string FreeText(string text) =>

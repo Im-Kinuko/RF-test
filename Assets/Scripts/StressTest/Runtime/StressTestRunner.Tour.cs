@@ -29,6 +29,10 @@ namespace StressTest.Runtime
 
         private IEnumerator RunTour()
         {
+            // 導覽畫面沿用 RUN 對照的流程（模擬韌體可以扣住整段回報）
+            _mode = SendMode.Burst;
+            _matrix.Mode = _mode;
+
             yield return Shot("disconnected");
 
             // ---- 連線異常 ----
@@ -114,7 +118,7 @@ namespace StressTest.Runtime
             ConfirmRound();
             yield return Shot("round_warmup_mismatch");
 
-            _round.ContinueFromReading(Time.realtimeSinceStartupAsDouble);
+            _round.ContinueFromReading(MonotonicClock.Now);
             yield return Until(() => _round.State == RoundState.AwaitingSegmentReading, 3);
             _round.EnterReading(2.3);
             sim.ReportOnly = 17;
@@ -188,7 +192,7 @@ namespace StressTest.Runtime
             _connectError = null;
             _link = sim;
             _session = new StressTestSession(_link, _entry);
-            _session.BeginHandshake(Time.realtimeSinceStartupAsDouble);
+            _session.BeginHandshake(MonotonicClock.Now);
         }
 
         private IEnumerator Shot(string name)

@@ -41,10 +41,11 @@ namespace StressTest.Tests
         {
             var lines = Outputs.Lines(RunFortyRound().Commands);
 
-            Assert.That(lines[0], Is.EqualTo("round_id,entry,gap_ms,n,sets,segment_index,seq,direction,start_us,end_us,gap_us"));
+            Assert.That(lines[0], Is.EqualTo("round_id,entry,gap_ms,n,sets,segment_index,seq,direction,start_us,end_us,gap_us," +
+                "send_mode,cmd_seq,status,pc_send_us,pc_reply_us,rx_us"));
             Assert.That(lines.Length, Is.EqualTo(1 + 40));
-            Assert.That(lines[1], Is.EqualTo("R1,OPTO,5,20,1,0,0,UP,1000000,1120000,"));
-            Assert.That(lines[2], Is.EqualTo("R1,OPTO,5,20,1,0,1,UP,1125008,1245008,5008"));
+            Assert.That(lines[1], Is.EqualTo("R1,OPTO,5,20,1,0,0,UP,1000000,1120000,,RUN,,,,,"));
+            Assert.That(lines[2], Is.EqualTo("R1,OPTO,5,20,1,0,1,UP,1125008,1245008,5008,RUN,,,,,"));
             Assert.That(lines[21], Does.StartWith("R1,OPTO,5,20,1,1,0,DOWN,"));
         }
 
@@ -66,10 +67,12 @@ namespace StressTest.Tests
             Assert.That(lines[0], Is.EqualTo(
                 "recorded_at,round_id,entry,firmware_version,firmware_params,gap_ms,n,sets,total_count,segments," +
                 "total_sent,total_drops,warmup_reading,end_reading,any_possibly_clamped,any_report_short,mean_gap_us,max_gap_us," +
-                "up_planned,down_planned,up_sent,down_sent,warmup_up,warmup_down,status,void_reason"));
+                "up_planned,down_planned,up_sent,down_sent,warmup_up,warmup_down," +
+                "send_mode,pc_sent,arduino_received,arduino_executed,link_lost,treadmill_missing,any_rebooted," +
+                "status,void_reason"));
             Assert.That(lines.Skip(1), Is.EqualTo(new[]
             {
-                "2026-11-22 09:30:00,R1,OPTO,0.1.0,press_ms=120;action_ms=120;max_run=90,5,20,1,40,2,40,3,1.0,1.3,0,0,5008.0,5008,20,20,20,20,0,0,completed,"
+                "2026-11-22 09:30:00,R1,OPTO,0.1.0,press_ms=120;action_ms=120;max_run=90;ack=1,5,20,1,40,2,40,3,1.0,1.3,0,0,5008.0,5008,20,20,20,20,0,0,RUN,,,,,3,0,completed,"
             }));
         }
 

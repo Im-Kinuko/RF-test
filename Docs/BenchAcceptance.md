@@ -2,8 +2,9 @@
 
 這份清單有兩個用途：一是確認兩支測試韌體在實機上的行為和協定一致，二是在開始正式條件矩陣之前，先跑一輪前測，確認資料流程可以從頭走到尾。照順序做，每完成一項就打勾；沒通過的項目，在「紀錄」欄寫下實際看到的結果。
 
-- 韌體：`Arduino/StressTest_Opto`、`Arduino/StressTest_RF`，兩支都是 v0.4.0
-- 規格與協定：`Docs/StressTest-Spec.md`
+- 韌體：`Arduino/StressTest_Opto`、`Arduino/StressTest_RF`，兩支都是 v0.5.0
+- 實驗設計：`Docs/ExperimentDesign.md`（前測 T1～T6 見第 9 節）
+- 協定：`README.md` 的序列協定一節
 - 安全守則：測試期間跑帶上不站人，原廠的停止鍵要隨時按得到。
 
 ---
@@ -24,7 +25,7 @@
 
 | ✓ | 送出 | 預期 | 紀錄 |
 |---|---|---|---|
-| ☐ | （開機） | `READY,OPTO,0.4.0,press_ms=120;action_ms=120;max_run=90` | |
+| ☐ | （開機） | `READY,OPTO,0.5.0,press_ms=120;action_ms=120;max_run=90;ack=1` | |
 | ☐ | `HELLO` | 同上一行 | |
 | ☐ | `ONE,UP`／`ONE,DOWN`／`ONE,STOP`／`ONE,START` | 腳位 3／4／5／6 依序亮約 0.12 秒，每次回 `ACK,ONE,…` | |
 | ☐ | `ONE,XYZ` | `ERR,BAD_COMMAND` | |
@@ -34,6 +35,11 @@
 | ☐ | 檢查上一步的 `T` | 每筆 `end − start` 約 120000 µs；下一筆 `start` − 上一筆 `end` 只有幾十到幾百 µs（間隔 0 ms） | |
 | ☐ | `RUN,UP,5,10` | 每筆之間的間隔約 10000 µs | |
 | ☐ | `RUN,UP,90,0` | 90 行 `T`，最後 `DONE,90`；板子沒有重開機（沒有突然跳出 `READY`） | |
+| ☐ | `ZERO` | `ACK,ZERO` | |
+| ☐ | `CMD,1,UP*7E` | 腳位 3 亮約 0.12 秒，之後回 `X,1,rx,start,end*XX`，`end − start` 約 120000 | |
+| ☐ | `CMD,2,DOWN*6A` | 腳位 4 動作，回 `X,2,…` | |
+| ☐ | `CMD,1,UP*00`（檢查碼錯） | 腳位不動作，回 `NAK,BAD_LINE*7E` | |
+| ☐ | `STAT` | `STAT,2,2,1*0F` 的格式；三個數字是 2、2、1（檢查碼隨數字改變） | |
 | ☐ | 送 `RUN,DOWN,20,10` 後立刻送 `ABORT` | `ABORTED,n`，n 小於 20；回報 n 行 `T` | |
 | ☐ | 中止後量腳位 3～6 | 全部 LOW（LED 熄滅，或電壓約 0 V） | |
 | ☐ | 閒置時送 `ABORT` | `ABORTED,0` | |
@@ -43,11 +49,12 @@
 
 | ✓ | 送出 | 預期 | 紀錄 |
 |---|---|---|---|
-| ☐ | （開機） | `READY,RF,0.4.0,bits=24;repeat=2;release_ms=250;action_ms=340;max_run=90` | |
+| ☐ | （開機） | `READY,RF,0.5.0,bits=24;repeat=2;release_ms=250;action_ms=340;max_run=90;ack=1` | |
 | ☐ | `ONE,UP` | 約 0.34 秒後回 `ACK,ONE,UP` | |
 | ☐ | `RUN,UP,5,0` | 每筆 `end − start` 約 340000 µs（RF 發射約 90 ms，加上 250 ms 釋放）。這是 `action_ms` 的實測值，請寫在紀錄欄。 | |
 | ☐ | `RUN,UP,90,0` | 約 31 秒後回 90 行 `T` 和 `DONE,90`；板子沒有重開機 | |
 | ☐ | `ABORT`、`ERR,BUSY`、`BAD_RUN` | 行為和光耦版相同 | |
+| ☐ | `ZERO`、`CMD,1,UP*7E`、`CMD,1,UP*00`、`STAT` | 行為和光耦版相同；`X` 的 `end − start` 約 340000 | |
 
 ## C. 連接 Unity
 
@@ -72,13 +79,13 @@
 | ☐ | 光耦、RF 兩個入口都做一遍 | 結果相同 | |
 | ☐ | 跑一段手動單段時按空白鍵 | 段被中止，接著送出停止，跑帶停下 | |
 
-## E. 前測：n = 30、間隔 10 ms
+## E. 前測：A 送法、n = 30、間隔 10 ms
 
 每個入口各跑一輪。全程用手機錄下面板畫面，畫面裡要同時拍到電腦螢幕，之後才能對照時間。
 
 | ✓ | 步驟 | 紀錄 |
 |---|---|---|
-| ☐ | 在右側矩陣點「10 ms × n = 30」 | |
+| ☐ | 右側面板選「A 等回覆」，在矩陣點「10 ms × n = 30」 | |
 | ☐ | 啟動後倒數 5 秒，接著預熱加速 11 次（1.0 → 2.0）；輸入面板讀數 2.0，按 Enter 兩次 | |
 | ☐ | 畫面上方顯示「加速 已送 0／預計 60　減速 已送 0／預計 60」 | |
 | ☐ | 段 1（加速 30 筆）結束時，看面板並輸入讀數；確認畫面的掉包數合理 | |
@@ -93,9 +100,10 @@
 | ✓ | 項目 | 紀錄 |
 |---|---|---|
 | ☐ | 用 Excel 直接開啟（雙擊即可），中文沒有亂碼。檔案是 UTF-8 BOM 編碼。 | |
-| ☐ | `commands_*.csv` 每輪有 120 列，`gap_us` 約 10000（每段第一筆空白） | |
+| ☐ | `commands_*.csv` 每輪有 120 列，`status` 都是 `done`。記下 `gap_us` 的分布（A 送法含序列往返時間，會大於 10000） | 中位數／最大： |
+| ☐ | 同樣條件改跑 gap 0，比較兩組 `gap_us` 是否分得開（實驗設計 T2） | |
 | ☐ | `segments_*.csv` 每輪有 4 列，`drops` 和畫面上顯示的一致 | |
-| ☐ | `rounds_*.csv` 每輪有 1 列，`status` 為 `completed`；`up_planned`、`down_planned` 各為 60，`warmup_up` 為 11，`up_sent`、`down_sent` 與 Arduino 回報一致 | |
+| ☐ | `rounds_*.csv` 每輪有 1 列，`status` 為 `completed`；`up_planned`、`down_planned` 各為 60，`warmup_up` 為 11，`pc_sent`、`arduino_received`、`arduino_executed` 為 120，`up_sent`、`down_sent` 與 Arduino 回報一致 | |
 | ☐ | 做出第五章的掉包表（做法見下方） | |
 
 **用 Excel 整理掉包表**

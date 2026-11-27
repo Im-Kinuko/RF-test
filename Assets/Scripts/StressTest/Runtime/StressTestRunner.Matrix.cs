@@ -11,6 +11,9 @@ namespace StressTest.Runtime
         private const string PrefPort = "StressTest.Port";
         private const string PrefEntry = "StressTest.Entry";
         private const string PrefRepetitions = "StressTest.Repetitions";
+        private const string PrefMode = "StressTest.SendMode";
+        private static readonly string[] ModeLabels = { "A 等回覆", "RUN 對照" };
+        private SendMode _mode = SendMode.Ack;
 
         private ConditionMatrix _matrix = new ConditionMatrix(3);
         private string _repetitionsText = "3";
@@ -23,6 +26,8 @@ namespace StressTest.Runtime
             _entry = PlayerPrefs.GetInt(PrefEntry, 0) == 1 ? EntryType.Rf : EntryType.Opto;
             _repetitionsText = PlayerPrefs.GetInt(PrefRepetitions, 3).ToString();
             if (int.TryParse(_repetitionsText, out var reps)) _matrix.Repetitions = reps;
+            _mode = PlayerPrefs.GetInt(PrefMode, 0) == 1 ? SendMode.Burst : SendMode.Ack;
+            _matrix.Mode = _mode;
         }
 
         private void SavePreferences()
@@ -30,6 +35,7 @@ namespace StressTest.Runtime
             if (_portIndex >= 0 && _portIndex < _ports.Length) PlayerPrefs.SetString(PrefPort, _ports[_portIndex]);
             PlayerPrefs.SetInt(PrefEntry, _entry == EntryType.Rf ? 1 : 0);
             if (int.TryParse(_repetitionsText, out var reps)) PlayerPrefs.SetInt(PrefRepetitions, reps);
+            PlayerPrefs.SetInt(PrefMode, _mode == SendMode.Burst ? 1 : 0);
             PlayerPrefs.Save();
         }
 
@@ -70,7 +76,14 @@ namespace StressTest.Runtime
             GUILayout.Label("條件矩陣", _title);
             if (_restoreMessage != null) GUILayout.Label(_restoreMessage, _small);
 
-            GUI.enabled = _round == null;
+            // 輪次或手動段進行中不能換送法
+            GUI.enabled = _round == null
+                          && _uiState != SessionState.RunningSegment && _uiState != SessionState.AwaitingReading;
+            _mode = GUILayout.Toolbar(_mode == SendMode.Ack ? 0 : 1, ModeLabels, _big) == 0 ? SendMode.Ack : SendMode.Burst;
+            _matrix.Mode = _mode;
+            GUILayout.Label(_mode == SendMode.Ack
+                ? "電腦逐筆送，收到完成回覆後等 gap 再送下一筆。"
+                : "對照組：電腦送一行，Arduino 自己連續送完整段。", _small);
             GUILayout.BeginHorizontal();
             GUILayout.Label("每條件輪數", _body, GUILayout.Width(Px(110)));
             _repetitionsText = GUILayout.TextField(_repetitionsText, _input, GUILayout.Width(Px(70)));
@@ -135,8 +148,8 @@ namespace StressTest.Runtime
                 return;
             }
 
-            GUILayout.Label($"下一輪：{EntryLabels[(int)connected]}、間隔 {next.GapMs} ms、n = {next.N}", _huge);
-            var config = new RoundConfig(next.GapMs, next.N);
+            GUILayout.Label($"下一輪（{_mode.Code()}）：{EntryLabels[(int)connected]}、間隔 {next.GapMs} ms、n = {next.N}", _huge);
+            var config = new RoundConfig(next.GapMs, next.N) { Mode = _mode };
             var plan = RoundPlan.Create(config.N, config.Sets, config.BaseSpeed);
             GUILayout.Label($"（加速 {config.N}、減速 {config.N}）× {config.Sets} 組＝共 {config.TotalCount} 筆，分 {plan.Segments.Count} 段", _title);
             GUILayout.Label(
