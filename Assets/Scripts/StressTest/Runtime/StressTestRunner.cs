@@ -36,7 +36,7 @@ namespace StressTest.Runtime
         private const string ReadingControl = "PanelReading";
         private SegmentDirection _direction = SegmentDirection.Up;
         private int _gapIndex;
-        private string _countText = "30";
+        private string _countText = "20";
         private string _startText = "2.0";
         private string _readingText = "";
         private string _inputError;
@@ -412,7 +412,7 @@ namespace StressTest.Runtime
             if (_inputError != null) return;
             if (!PanelSpeedInput.TryParse(_startText, out var startSpeed))
             {
-                _inputError = "目前面板速度請輸入 1.0～12.0。";
+                _inputError = $"目前面板速度請輸入 {PanelSpeedInput.Min:F1}～{PanelSpeedInput.Max:F1}。";
                 return;
             }
 
@@ -479,10 +479,6 @@ namespace StressTest.Runtime
                 GUILayout.Label($"預期高於跑步機最高速度 {PanelSpeedInput.Max:F1}：請照實際面板輸入，這段會標記「可能觸頂」。", _title);
             }
 
-            else if (expectedSpeed >= 10 - 1e-9)
-            {
-                GUILayout.Label($"10 以上請打三位數或加小數點：{expectedSpeed:F1} 打「{expectedSpeed * 10:F0}」。只打兩位數會被當成 1.x。", _title);
-            }
 
             var submit = false;
             var e = Event.current;
@@ -508,7 +504,7 @@ namespace StressTest.Runtime
                 }
                 else
                 {
-                    _inputError = "請輸入 1.0～12.0 的面板速度，例如 2.7 或 27。";
+                    _inputError = $"請輸入 {PanelSpeedInput.Min:F1}～{PanelSpeedInput.Max:F1} 的面板速度，例如 2.7 或 27。";
                 }
             }
 

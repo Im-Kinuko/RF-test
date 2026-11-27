@@ -50,13 +50,13 @@ namespace StressTest.Tests
         [Test]
         public void ExperimentDefaultsToSendModeA()
         {
-            Assert.That(new RoundConfig(gapMs: 5, n: 30).Mode, Is.EqualTo(SendMode.Ack));
+            Assert.That(new RoundConfig(gapMs: 5, totalCount: 40).Mode, Is.EqualTo(SendMode.Ack));
         }
 
         [Test]
         public void Round_SendsEveryCommandFromThePc_NeverRun()
         {
-            var h = new RoundHarness(sets: 2, mode: SendMode.Ack);
+            var h = new RoundHarness(totalCount: 80, mode: SendMode.Ack);
             h.StartAndWarmUp();
             h.CompleteSegment(3.0);
             h.CompleteSegment(1.0);
@@ -190,7 +190,7 @@ namespace StressTest.Tests
         public void ModeA_IsNotLimitedByTheRunBufferSize()
         {
             var arduino = new FakeArduino(parameters: "action_ms=120;max_run=32;ack=1");
-            var h = new RoundHarness(n: 60, arduino: arduino, mode: SendMode.Ack);
+            var h = new RoundHarness(totalCount: 80, segmentSize: 40, arduino: arduino, mode: SendMode.Ack);
 
             h.Start();
 
@@ -230,8 +230,8 @@ namespace StressTest.Tests
             writer.Write(session.SubmitReading(2.2).Segment, EntryType.Opto);
 
             Assert.That(Outputs.Rows(output), Is.EqualTo(2));
-            Assert.That((Outputs.Cell(output, 0, "round_id"), Outputs.Cell(output, 0, "n"), Outputs.Cell(output, 0, "sets")),
-                Is.EqualTo(("", "2", "")));
+            Assert.That((Outputs.Cell(output, 0, "round_id"), Outputs.Cell(output, 0, "total_count"),
+                Outputs.Cell(output, 0, "segment_index")), Is.EqualTo(("", "2", "")));
             Assert.That((Outputs.Cell(output, 1, "gap_ms"), Outputs.Cell(output, 1, "cmd_seq")), Is.EqualTo(("1000", "2")));
         }
 
@@ -239,7 +239,7 @@ namespace StressTest.Tests
         public void Matrix_CountsEachSendModeSeparately()
         {
             var o = RunRoundWithOneLostCommand();
-            var lines = o.Rounds.ToString().Replace(",5,20,1,", ",5,30,2,")
+            var lines = o.Rounds.ToString()
                 .Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
 
             var a = new ConditionMatrix(3) { Mode = SendMode.Ack };
@@ -247,8 +247,8 @@ namespace StressTest.Tests
             a.LoadRoundsCsv(lines);
             run.LoadRoundsCsv(lines);
 
-            Assert.That(a.Completed(EntryType.Opto, 5, 30), Is.EqualTo(1));
-            Assert.That(run.Completed(EntryType.Opto, 5, 30), Is.EqualTo(0));
+            Assert.That(a.Completed(EntryType.Opto, 5, 40), Is.EqualTo(1));
+            Assert.That(run.Completed(EntryType.Opto, 5, 40), Is.EqualTo(0));
         }
     }
 }

@@ -14,7 +14,7 @@ namespace StressTest.Core
         public const string CommandsHeader = CommandCsvWriter.Header;
 
         public const string RoundsHeader =
-            "recorded_at,round_id,entry,firmware_version,firmware_params,gap_ms,n,sets,total_count,segments," +
+            "recorded_at,round_id,entry,firmware_version,firmware_params,gap_ms,total_count,segment_size,segments," +
             "total_sent,total_drops,warmup_reading,end_reading,any_possibly_clamped,any_report_short,mean_gap_us,max_gap_us," +
             "up_planned,down_planned,up_sent,down_sent,warmup_up,warmup_down," +
             "send_mode,pc_sent,arduino_received,arduino_executed,link_lost,treadmill_missing,any_rebooted," +
@@ -42,7 +42,7 @@ namespace StressTest.Core
 
         public void WriteSegment(string roundId, RoundConfig config, FirmwareInfo firmware, int segmentIndex, SegmentResult result)
         {
-            _commands.Write(result.Segment, firmware.Entry, roundId, config.N, config.Sets, segmentIndex);
+            _commands.Write(result.Segment, firmware.Entry, roundId, config.TotalCount, segmentIndex);
             _segments.Write(result, firmware.Entry, firmware.Version, _clock(), roundId, segmentIndex);
         }
 
@@ -59,9 +59,8 @@ namespace StressTest.Core
                 firmware.Version,
                 parameters,
                 config.GapMs.ToString(c),
-                config.N.ToString(c),
-                config.Sets.ToString(c),
                 config.TotalCount.ToString(c),
+                config.SegmentSize.ToString(c),
                 summary.SegmentCount.ToString(c),
                 summary.TotalSent.ToString(c),
                 summary.TotalDrops.ToString(c),

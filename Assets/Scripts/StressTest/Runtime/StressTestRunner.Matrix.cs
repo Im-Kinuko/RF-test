@@ -12,11 +12,13 @@ namespace StressTest.Runtime
         private const string PrefEntry = "StressTest.Entry";
         private const string PrefRepetitions = "StressTest.Repetitions";
         private const string PrefMode = "StressTest.SendMode";
+        private const string PrefSegmentSize = "StressTest.SegmentSize";
         private static readonly string[] ModeLabels = { "A 等回覆", "RUN 對照" };
         private SendMode _mode = SendMode.Ack;
 
         private ConditionMatrix _matrix = new ConditionMatrix(3);
         private string _repetitionsText = "3";
+        private string _segmentSizeText = "20";
         private string _preferredPort;
         private string _restoreMessage;
 
@@ -28,6 +30,10 @@ namespace StressTest.Runtime
             if (int.TryParse(_repetitionsText, out var reps)) _matrix.Repetitions = reps;
             _mode = PlayerPrefs.GetInt(PrefMode, 0) == 1 ? SendMode.Burst : SendMode.Ack;
             _matrix.Mode = _mode;
+            // 舊版偏好可能超過現在的上限，超過就回到預設
+            var size = PlayerPrefs.GetInt(PrefSegmentSize, RoundConfig.DefaultSegmentSize);
+            if (size < 1 || size > RoundConfig.MaxSegmentSize) size = RoundConfig.DefaultSegmentSize;
+            _segmentSizeText = size.ToString();
         }
 
         private void SavePreferences()
@@ -36,6 +42,7 @@ namespace StressTest.Runtime
             PlayerPrefs.SetInt(PrefEntry, _entry == EntryType.Rf ? 1 : 0);
             if (int.TryParse(_repetitionsText, out var reps)) PlayerPrefs.SetInt(PrefRepetitions, reps);
             PlayerPrefs.SetInt(PrefMode, _mode == SendMode.Burst ? 1 : 0);
+            if (int.TryParse(_segmentSizeText, out var size)) PlayerPrefs.SetInt(PrefSegmentSize, size);
             PlayerPrefs.Save();
         }
 
@@ -70,6 +77,14 @@ namespace StressTest.Runtime
             while ((line = reader.ReadLine()) != null) yield return line;
         }
 
+        private bool TryReadSegmentSize(out int segmentSize)
+        {
+            if (int.TryParse(_segmentSizeText, out segmentSize) && segmentSize >= 1
+                && segmentSize <= RoundConfig.MaxSegmentSize) return true;
+            _roundMessage = $"每段筆數請輸入 1～{RoundConfig.MaxSegmentSize}。";
+            return false;
+        }
+
         /// <summary>右側：條件矩陣、輪數設定、排程建議。格子是次要按鈕，只有閒置時可按。</summary>
         private void DrawMatrixPanel()
         {
@@ -88,17 +103,18 @@ namespace StressTest.Runtime
             GUILayout.Label("每條件輪數", _body, GUILayout.Width(Px(110)));
             _repetitionsText = GUILayout.TextField(_repetitionsText, _input, GUILayout.Width(Px(70)));
             if (int.TryParse(_repetitionsText, out var reps) && reps >= 1 && reps <= 20) _matrix.Repetitions = reps;
+            GUILayout.Space(Px(16));
+            GUILayout.Label("每段筆數", _body, GUILayout.Width(Px(90)));
+            _segmentSizeText = GUILayout.TextField(_segmentSizeText, _input, GUILayout.Width(Px(70)));
             GUILayout.EndHorizontal();
             GUI.enabled = true;
-
-            GUILayout.Label($"n＝每段筆數；一輪＝（加速 n、減速 n）× {RoundConfig.DefaultSets} 組。", _small);
 
             DrawMatrixGrid();
 
             var scheduled = _matrix.Next();
             GUILayout.Label(scheduled == null
                 ? "所有條件都已完成設定的輪數。"
-                : $"整體排程下一輪：{EntryLabels[(int)scheduled.Entry]}、{scheduled.GapMs} ms、n = {scheduled.N}（第 {scheduled.Repetition} 輪）",
+                : $"整體排程下一輪：{EntryLabels[(int)scheduled.Entry]}、{scheduled.GapMs} ms、{scheduled.TotalCount} 次（第 {scheduled.Repetition} 輪）",
                 _small);
 
             if (GUILayout.Button("開啟紀錄資料夾", _big)) OpenLogFolder();
@@ -114,22 +130,22 @@ namespace StressTest.Runtime
 
             GUILayout.BeginHorizontal();
             GUILayout.Label("", _body, GUILayout.Width(Px(70)));
-            foreach (var n in ConditionMatrix.NValues) GUILayout.Label($"n = {n}", _title, cellWidth);
+            foreach (var count in ConditionMatrix.Counts) GUILayout.Label($"{count} 次", _title, cellWidth);
             GUILayout.EndHorizontal();
 
             foreach (var gap in ConditionMatrix.Gaps)
             {
                 GUILayout.BeginHorizontal();
                 GUILayout.Label($"{gap} ms", _title, GUILayout.Width(Px(70)));
-                foreach (var n in ConditionMatrix.NValues)
+                foreach (var count in ConditionMatrix.Counts)
                 {
-                    var opto = _matrix.Completed(EntryType.Opto, gap, n);
-                    var rf = _matrix.Completed(EntryType.Rf, gap, n);
+                    var opto = _matrix.Completed(EntryType.Opto, gap, count);
+                    var rf = _matrix.Completed(EntryType.Rf, gap, count);
                     var done = opto >= _matrix.Repetitions && rf >= _matrix.Repetitions;
                     var label = $"光耦 {opto}/{_matrix.Repetitions}\nRF {rf}/{_matrix.Repetitions}" + (done ? "（完成）" : "");
 
                     GUI.enabled = CanStartRound;
-                    if (GUILayout.Button(label, _cell, cellWidth)) StartRound(gap, n);
+                    if (GUILayout.Button(label, _cell, cellWidth)) StartRound(gap, count);
                     GUI.enabled = true;
                 }
                 GUILayout.EndHorizontal();
@@ -148,10 +164,19 @@ namespace StressTest.Runtime
                 return;
             }
 
-            GUILayout.Label($"下一輪（{_mode.Code()}）：{EntryLabels[(int)connected]}、間隔 {next.GapMs} ms、n = {next.N}", _huge);
-            var config = new RoundConfig(next.GapMs, next.N) { Mode = _mode };
-            var plan = RoundPlan.Create(config.N, config.Sets, config.BaseSpeed);
-            GUILayout.Label($"（加速 {config.N}、減速 {config.N}）× {config.Sets} 組＝共 {config.TotalCount} 筆，分 {plan.Segments.Count} 段", _title);
+            GUILayout.Label($"下一輪（{_mode.Code()}）：{EntryLabels[(int)connected]}、間隔 {next.GapMs} ms、{next.TotalCount} 次", _huge);
+            var sizeValid = int.TryParse(_segmentSizeText, out var size) && size >= 1 && size <= RoundConfig.MaxSegmentSize;
+            var config = new RoundConfig(next.GapMs, next.TotalCount, sizeValid ? size : RoundConfig.DefaultSegmentSize)
+                { Mode = _mode };
+            var plan = RoundPlan.Create(config.TotalCount, config.SegmentSize, config.BaseSpeed);
+            if (sizeValid)
+            {
+                GUILayout.Label($"加速 {plan.UpCount} 次、減速 {plan.DownCount} 次，分 {plan.Segments.Count} 段（每段 {size} 筆）", _title);
+            }
+            else
+            {
+                GUILayout.Label($"每段筆數請輸入 1～{RoundConfig.MaxSegmentSize}。", _title);
+            }
             GUILayout.Label(
                 $"第 {next.Repetition} 輪。開始後會自動啟動跑步機（開機 {config.BootSpeed:F1} km/h），" +
                 $"預熱加速 {config.WarmupCount} 次到 {config.BaseSpeed:F1} 後開始計分" +
@@ -165,8 +190,8 @@ namespace StressTest.Runtime
                 GUILayout.Label($"依整體排程下一輪輪到{EntryLabels[(int)scheduled.Entry]}；也可以先繼續用{EntryLabels[(int)connected]}。", _small);
             }
 
-            GUI.enabled = CanStartRound && unsupported == null;
-            PrimaryButton("開始下一輪", () => StartRound(next.GapMs, next.N));
+            GUI.enabled = CanStartRound && unsupported == null && sizeValid;
+            PrimaryButton("開始下一輪", () => StartRound(next.GapMs, next.TotalCount));
             GUI.enabled = true;
         }
 

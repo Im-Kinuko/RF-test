@@ -36,7 +36,7 @@ namespace StressTest.Core
             Config = config ?? throw new ArgumentNullException(nameof(config));
             RoundId = roundId;
             _log = log;
-            Plan = RoundPlan.Create(config.N, config.Sets, config.BaseSpeed);
+            Plan = RoundPlan.Create(config.TotalCount, config.SegmentSize, config.BaseSpeed);
         }
 
         public RoundConfig Config { get; }
@@ -47,8 +47,8 @@ namespace StressTest.Core
 
         public double CountdownRemaining { get; private set; }
 
-        /// <summary>預熱已送出的加速次數與應送次數。</summary>
-        public int WarmupSent => _warmupSent;
+        /// <summary>本次預熱中 Arduino 已回覆完成的次數：從 0 開始，每完成一次加 1。</summary>
+        public int WarmupDone { get; private set; }
 
         /// <summary>預熱與重新預熱累計送出的單發加速／減速次數（不計分）。</summary>
         public int WarmupUpSent { get; private set; }
@@ -68,7 +68,7 @@ namespace StressTest.Core
 
         /// <summary>目前的韌體跑不了這個條件時回傳原因，否則為 null。</summary>
         public static string CheckFirmware(FirmwareInfo firmware, RoundConfig config) =>
-            firmware?.CheckSegment(config.Mode, config.N);
+            firmware?.CheckSegment(config.Mode, Math.Min(config.SegmentSize, config.TotalCount));
 
         public void Start(double now)
         {
@@ -104,14 +104,16 @@ namespace StressTest.Core
                     break;
 
                 case RoundState.WarmingUp:
-                    if (_warmupSent >= WarmupTarget)
+                    // 每次按壓（含最後一次）都等滿一個間隔：面板跟得上，最後的計數也看得到
+                    if (now < _nextWarmupAt - TimeEpsilon) break;
+                    if (_warmupSent < WarmupTarget)
+                    {
+                        SendWarmupPress(now);
+                    }
+                    else
                     {
                         ExpectedPanelSpeed = Config.BaseSpeed;
                         State = RoundState.AwaitingWarmupReading;
-                    }
-                    else if (now >= _nextWarmupAt - TimeEpsilon)
-                    {
-                        SendWarmupPress(now);
                     }
                     break;
 
@@ -344,6 +346,7 @@ namespace StressTest.Core
             _warmupDirection = direction;
             WarmupTarget = count;
             _warmupSent = 0;
+            WarmupDone = 0;
             _nextWarmupAt = now;
             if (count > 0) SendWarmupPress(now);
         }
@@ -400,6 +403,7 @@ namespace StressTest.Core
                 _lastAckAt = now;
                 if (_pendingWarmupPress == SingleCommand.Up) WarmupUpSent++;
                 else if (_pendingWarmupPress == SingleCommand.Down) WarmupDownSent++;
+                if (_pendingWarmupPress != null) WarmupDone++;
                 _pendingWarmupPress = null;
                 return true;
             }

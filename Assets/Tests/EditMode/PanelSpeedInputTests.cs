@@ -11,8 +11,8 @@ namespace StressTest.Tests
         [TestCase("27", 2.7)]
         [TestCase(" 2.7 ", 2.7)]
         [TestCase("12", 1.2)]
-        [TestCase("12.0", 12.0)]
-        [TestCase("110", 11.0)] // n = 90 的加速段終點
+        [TestCase("6.0", 6.0)]
+        [TestCase("60", 6.0)]
         public void Accepts(string text, double expected)
         {
             Assert.That(PanelSpeedInput.TryParse(text, out var speed), Is.True);
@@ -25,8 +25,9 @@ namespace StressTest.Tests
         [TestCase("0.9")]   // 跑步機最低 1.0 km/h
         [TestCase("0.5")]
         [TestCase("-1")]
-        [TestCase("12.5")]
-        [TestCase("130")]
+        [TestCase("6.1")]   // 跑步機最高 6.0 km/h
+        [TestCase("61")]
+        [TestCase("12.0")]
         public void Rejects(string text)
         {
             Assert.That(PanelSpeedInput.TryParse(text, out _), Is.False);

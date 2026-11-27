@@ -8,12 +8,12 @@ namespace StressTest.Core
 {
     /// <summary>
     /// 逐筆指令 CSV。A 送法每送出一筆就有一列（沒有回覆的也有）；RUN 只有韌體回報時間戳的筆。
-    /// 手動段沒有 round_id、sets、segment_index，三欄留空。每段寫完即 flush。
+    /// 手動段沒有 round_id、segment_index，兩欄留空。每段寫完即 flush。
     /// </summary>
     public sealed class CommandCsvWriter
     {
         public const string Header =
-            "round_id,entry,gap_ms,n,sets,segment_index,seq,direction,start_us,end_us,gap_us," +
+            "round_id,entry,gap_ms,total_count,segment_index,seq,direction,start_us,end_us,gap_us," +
             "send_mode,cmd_seq,status,pc_send_us,pc_reply_us,rx_us";
 
         private readonly TextWriter _output;
@@ -28,8 +28,8 @@ namespace StressTest.Core
             }
         }
 
-        /// <summary>n 省略時用這一段的筆數。</summary>
-        public void Write(SegmentRun segment, EntryType entry, string roundId = null, int? n = null, int? sets = null,
+        /// <summary>totalCount 省略時用這一段的筆數（手動段）。</summary>
+        public void Write(SegmentRun segment, EntryType entry, string roundId = null, int? totalCount = null,
             int? segmentIndex = null)
         {
             var c = CultureInfo.InvariantCulture;
@@ -37,8 +37,7 @@ namespace StressTest.Core
                 roundId ?? "",
                 CsvFormat.Entry(entry),
                 segment.GapMs.ToString(c),
-                (n ?? segment.Count).ToString(c),
-                CsvFormat.Count(sets),
+                (totalCount ?? segment.Count).ToString(c),
                 CsvFormat.Count(segmentIndex));
             var timestamps = segment.Timestamps.ToDictionary(t => t.Index);
 

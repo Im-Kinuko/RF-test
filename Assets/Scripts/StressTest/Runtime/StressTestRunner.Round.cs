@@ -20,15 +20,16 @@ namespace StressTest.Runtime
             && _round.State != RoundState.Completed
             && _round.State != RoundState.Failed;
 
-        private void StartRound(int gap, int n)
+        private void StartRound(int gap, int total)
         {
-            var config = new RoundConfig(gap, n) { Mode = _mode };
+            if (!TryReadSegmentSize(out var segmentSize)) return;
+            var config = new RoundConfig(gap, total, segmentSize) { Mode = _mode };
             _roundMessage = TestRound.CheckFirmware(_session.Firmware, config);
             if (_roundMessage != null) return;
             SavePreferences();
 
             var entry = _session.Firmware.Entry == EntryType.Opto ? "OPTO" : "RF";
-            var roundId = $"{DateTime.Now:yyyyMMdd-HHmmss}-{entry}-{config.Mode.Code()}-G{gap}-N{n}";
+            var roundId = $"{DateTime.Now:yyyyMMdd-HHmmss}-{entry}-{config.Mode.Code()}-G{gap}-N{total}";
 
             try
             {
@@ -77,7 +78,7 @@ namespace StressTest.Runtime
                 || r.State == RoundState.ConfirmingSegmentReading
                 ? $"　段 {r.SegmentIndex + 1}／{r.Plan.Segments.Count}"
                 : "";
-            GUILayout.Label($"本輪（{r.Config.Mode.Code()}）：間隔 {r.Config.GapMs} ms、n = {r.Config.N}（共 {r.Config.TotalCount} 筆）{segmentText}", _title);
+            GUILayout.Label($"本輪（{r.Config.Mode.Code()}）：間隔 {r.Config.GapMs} ms、{r.Config.TotalCount} 次{segmentText}", _title);
             GUILayout.Label(
                 $"加速 已送 {r.UpSent}／預計 {r.Plan.UpCount}　減速 已送 {r.DownSent}／預計 {r.Plan.DownCount}" +
                 (r.WarmupUpSent + r.WarmupDownSent > 0 ? $"　預熱 加速 {r.WarmupUpSent}、減速 {r.WarmupDownSent}" : ""),
@@ -93,7 +94,7 @@ namespace StressTest.Runtime
 
                 case RoundState.WarmingUp:
                     var direction = r.WarmupDirection == SingleCommand.Down ? "減速" : "加速";
-                    GUILayout.Label($"預熱{direction}：{r.WarmupSent}／{r.WarmupTarget}", _huge);
+                    GUILayout.Label($"預熱{direction}：{r.WarmupDone}／{r.WarmupTarget}", _huge);
                     GUILayout.Label($"每秒一次，把速度帶到 {r.Config.BaseSpeed:F1} km/h。不計分。", _body);
                     break;
 
@@ -194,7 +195,7 @@ namespace StressTest.Runtime
             {
                 if (_round.Finish(voidReason))
                 {
-                    _matrix.Record(_session?.Firmware?.Entry ?? _entry, _round.Config.GapMs, _round.Config.N, _round.IsVoided,
+                    _matrix.Record(_session?.Firmware?.Entry ?? _entry, _round.Config.GapMs, _round.Config.TotalCount, _round.IsVoided,
                         _round.Config.Mode);
                 }
             }
@@ -295,7 +296,7 @@ namespace StressTest.Runtime
                 _body);
             if (result.Segment.Mode == SendMode.Ack) GUILayout.Label(HopText(result), _title);
             if (result.PossiblyClamped)
-                GUILayout.Label("可能觸底／觸頂：理論終點超出 1.0～12.0，這段的掉包數不可信。", _title);
+                GUILayout.Label($"可能觸底／觸頂：理論終點超出 {PanelSpeedInput.Min:F1}～{PanelSpeedInput.Max:F1}，這段的掉包數不可信。", _title);
             if (result.Segment.Rebooted)
                 GUILayout.Label("Arduino 在這段中重新開機。", _title);
             if (!result.Segment.ReportShort) return;

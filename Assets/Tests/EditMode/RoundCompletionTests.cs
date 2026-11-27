@@ -23,7 +23,7 @@ namespace StressTest.Tests
         [Test]
         public void Summary_TotalsDropsAndGapsAcrossSegments()
         {
-            var h = new RoundHarness(gapMs: 5, sets: 3, arduino: new FakeArduino { GapJitterMicros = 8 });
+            var h = new RoundHarness(gapMs: 5, totalCount: 120, arduino: new FakeArduino { GapJitterMicros = 8 });
             h.StartAndWarmUp();
             // 預期 3.0 / 1.0 / 3.0 / 1.0 / 3.0 / 1.0，每段以實際讀數為起點
             h.CompleteSegment(2.7); // +1.7 → 漏 3

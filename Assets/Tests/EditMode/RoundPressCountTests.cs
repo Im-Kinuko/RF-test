@@ -5,21 +5,22 @@ namespace StressTest.Tests
 {
     public class RoundPressCountTests
     {
-        [TestCase(30, 60)]
-        [TestCase(60, 120)]
-        [TestCase(90, 180)]
-        public void Plan_CountsUpAndDownPresses(int n, int perDirection)
+        [TestCase(40, 20, 20, 20)]
+        [TestCase(80, 20, 40, 40)]
+        [TestCase(120, 20, 60, 60)]
+        [TestCase(40, 15, 25, 15)] // 15 加、15 減、10 加
+        public void Plan_CountsUpAndDownPresses(int total, int segmentSize, int ups, int downs)
         {
-            var plan = RoundPlan.Create(n, sets: 2, baseSpeed: 2.0);
+            var plan = RoundPlan.Create(total, segmentSize, baseSpeed: 1.0);
 
-            Assert.That(plan.UpCount, Is.EqualTo(perDirection));
-            Assert.That(plan.DownCount, Is.EqualTo(perDirection));
+            Assert.That(plan.UpCount, Is.EqualTo(ups));
+            Assert.That(plan.DownCount, Is.EqualTo(downs));
         }
 
         [Test]
         public void CompletedRound_ReportsPlannedAndSentPressesByDirection()
         {
-            var h = new RoundHarness(gapMs: 5, sets: 2);
+            var h = new RoundHarness(gapMs: 5, totalCount: 80);
             h.StartAndWarmUp();
             h.CompleteSegment(3.0);
             h.CompleteSegment(1.0);

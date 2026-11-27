@@ -23,7 +23,7 @@ namespace StressTest.Core
     }
 
     /// <summary>
-    /// 每組一段加速 n 筆、一段減速 n 筆，重複 sets 組；速度在 baseSpeed ↔ baseSpeed + n × 0.1 之間來回。
+    /// 把總次數切成每段 segmentSize 筆、加減交替的多段，速度在 baseSpeed ↔ baseSpeed + segmentSize × 0.1 之間來回。
     /// </summary>
     public sealed class RoundPlan
     {
@@ -47,20 +47,25 @@ namespace StressTest.Core
             return total;
         }
 
-        public static RoundPlan Create(int n, int sets, double baseSpeed)
+        public static RoundPlan Create(int totalCount, int segmentSize, double baseSpeed)
         {
-            if (n < 1) throw new ArgumentOutOfRangeException(nameof(n));
-            if (sets < 1) throw new ArgumentOutOfRangeException(nameof(sets));
+            if (totalCount < 1) throw new ArgumentOutOfRangeException(nameof(totalCount));
+            if (segmentSize < 1) throw new ArgumentOutOfRangeException(nameof(segmentSize));
 
             var segments = new List<PlannedSegment>();
+            var remaining = totalCount;
             var speed = baseSpeed;
+            var direction = SegmentDirection.Up;
 
-            for (var i = 0; i < sets * 2; i++)
+            while (remaining > 0)
             {
-                var direction = i % 2 == 0 ? SegmentDirection.Up : SegmentDirection.Down;
-                var segment = new PlannedSegment(i, direction, n, speed);
+                var count = Math.Min(segmentSize, remaining);
+                var segment = new PlannedSegment(segments.Count, direction, count, speed);
                 segments.Add(segment);
+
                 speed = segment.ExpectedEndSpeed;
+                remaining -= count;
+                direction = direction == SegmentDirection.Up ? SegmentDirection.Down : SegmentDirection.Up;
             }
 
             return new RoundPlan(segments);
