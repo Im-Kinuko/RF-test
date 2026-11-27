@@ -33,7 +33,7 @@ namespace StressTest.Tests
         [Test]
         public void LargestSegment_ReachesButNeverExceedsTheTreadmillMaximum()
         {
-            var plan = RoundPlan.Create(80, RoundConfig.MaxSegmentSize, baseSpeed: 2.0);
+            var plan = RoundPlan.Create(80, RoundConfig.MaxSegmentSizeFor(SendMode.Burst), baseSpeed: 2.0);
 
             Assert.That(PanelSpeedInput.Max, Is.EqualTo(6.0));
             Assert.That(plan.Segments.Max(s => s.ExpectedEndSpeed), Is.EqualTo(PanelSpeedInput.Max).Within(1e-9));

@@ -16,7 +16,7 @@ namespace StressTest.Core
             "recorded_at,round_id,segment_index,entry,firmware_version,direction,count,gap_ms,start_speed,expected_end,actual_end," +
             "expected_change,actual_change,drops,reported_count,report_short,timed_out,possibly_clamped,mean_gap_us,max_gap_us," +
             "send_mode,pc_sent,arduino_received,arduino_executed,arduino_bad,replies,rejected,no_reply," +
-            "panel_steps,link_lost,treadmill_missing,rebooted";
+            "panel_steps,link_lost,treadmill_missing,rebooted,flow";
 
         private readonly TextWriter _output;
 
@@ -69,7 +69,8 @@ namespace StressTest.Core
                 result.PanelSteps.ToString(c),
                 CsvFormat.Count(result.LinkLost),
                 CsvFormat.Count(result.TreadmillMissing),
-                CsvFormat.Flag(s.Rebooted)
+                CsvFormat.Flag(s.Rebooted),
+                CsvFormat.Flow(s.Continuous)
             };
             _output.WriteLine(string.Join(",", fields));
             _output.Flush();
@@ -85,6 +86,7 @@ namespace StressTest.Core
         public static string Speed(double v) => v.ToString("F1", CultureInfo.InvariantCulture);
         public static string Speed(double? v) => v.HasValue ? Speed(v.Value) : "";
         public static string Flag(bool b) => b ? "1" : "0";
+        public static string Flow(bool continuous) => continuous ? "continuous" : "segmented";
         public static string Count(int? v) => v?.ToString(CultureInfo.InvariantCulture) ?? "";
 
         public static string Status(CommandStatus status)

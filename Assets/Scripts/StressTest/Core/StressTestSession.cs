@@ -68,6 +68,9 @@ namespace StressTest.Core
 
         public SegmentRun CurrentSegment { get; private set; }
 
+        /// <summary>目前（或剛完成）的逐筆傳送；RUN 對照沒有。</summary>
+        public PacedRun CurrentRun { get; private set; }
+
         /// <summary>A 送法的一段正在傳送中；介面層此時應密集呼叫 Poll。</summary>
         public bool IsPacing
         {
@@ -97,6 +100,7 @@ namespace StressTest.Core
                 if (State != SessionState.Ready || WaitingForLateDone) return false;
 
                 LastError = null;
+                CurrentRun = null;
                 CurrentSegment = new SegmentRun(direction, count, gapMs, startSpeed);
                 State = SessionState.RunningSegment;
                 _segmentDeadline = now + SegmentTimeoutSeconds(count, gapMs);
@@ -113,15 +117,56 @@ namespace StressTest.Core
         {
             lock (_sync)
             {
-                if (State != SessionState.Ready || WaitingForLateDone) return false;
+                return BeginPaced(new[] { new SegmentRun(direction, count, gapMs, startSpeed, SendMode.Ack) }, now);
+            }
+        }
 
-                LastError = null;
-                CurrentSegment = new SegmentRun(direction, count, gapMs, startSpeed, SendMode.Ack);
-                State = SessionState.RunningSegment;
-                _now = Math.Max(_now, now);
-                _paced = new PacedSender(_link, CurrentSegment, ActionMs, _lastSequence);
-                _paced.Start(_now);
-                return true;
+        /// <summary>
+        /// A 送法的整輪：依計畫把各段接在一起逐筆送出，段與段之間不停。
+        /// 各段起點先用理論值，實際值由研究人員事後輸入。
+        /// </summary>
+        public bool RunContinuous(IReadOnlyList<PlannedSegment> plan, int gapMs, double startSpeed, double now)
+        {
+            lock (_sync)
+            {
+                var blocks = new List<SegmentRun>();
+                foreach (var planned in plan)
+                {
+                    var offset = planned.ExpectedStartSpeed - plan[0].ExpectedStartSpeed;
+                    blocks.Add(new SegmentRun(planned.Direction, planned.Count, gapMs, startSpeed + offset, SendMode.Ack)
+                    {
+                        Continuous = true,
+                        Predecessor = blocks.Count > 0 ? blocks[blocks.Count - 1] : null
+                    });
+                }
+                return BeginPaced(blocks, now);
+            }
+        }
+
+        private bool BeginPaced(IReadOnlyList<SegmentRun> blocks, double now)
+        {
+            if (State != SessionState.Ready || WaitingForLateDone) return false;
+
+            LastError = null;
+            CurrentRun = new PacedRun(blocks);
+            CurrentSegment = blocks[0];
+            State = SessionState.RunningSegment;
+            _now = Math.Max(_now, now);
+            _paced = new PacedSender(_link, CurrentRun, ActionMs, _lastSequence);
+            _paced.Start(_now);
+            return true;
+        }
+
+        /// <summary>
+        /// 連續傳送結束後（AwaitingReading）收下結果並回到 Ready，讓呼叫端接著送停止；其他狀態回傳 null。
+        /// </summary>
+        public PacedRun CompleteRun()
+        {
+            lock (_sync)
+            {
+                if (State != SessionState.AwaitingReading || CurrentRun == null) return null;
+                State = SessionState.Ready;
+                return CurrentRun;
             }
         }
 
@@ -150,8 +195,8 @@ namespace StressTest.Core
             {
                 if (_paced != null)
                 {
-                    CurrentSegment.Aborted = true;
-                    CurrentSegment.ReportedCount = CurrentSegment.Replies;
+                    _paced.MarkRemaining(block => block.Aborted = true);
+                    ReportFromReplies();
                     EndPaced();
                     State = SessionState.Ready;
                     return true;
@@ -191,6 +236,7 @@ namespace StressTest.Core
                 if (_paced != null)
                 {
                     _paced.Advance(now);
+                    CurrentSegment = _paced.CurrentBlock;
                     if (_paced.IsFinished) FinishPaced();
                 }
                 else if (State == SessionState.RunningSegment && now > _segmentDeadline)
@@ -204,9 +250,14 @@ namespace StressTest.Core
 
         private void FinishPaced()
         {
-            CurrentSegment.ReportedCount = CurrentSegment.ArduinoExecuted ?? CurrentSegment.Replies;
+            foreach (var block in CurrentRun.Blocks) block.ReportedCount = block.ArduinoExecuted ?? block.Replies;
             EndPaced();
             State = SessionState.AwaitingReading;
+        }
+
+        private void ReportFromReplies()
+        {
+            foreach (var block in CurrentRun.Blocks) block.ReportedCount = block.Replies;
         }
 
         private void EndPaced()
@@ -290,12 +341,16 @@ namespace StressTest.Core
                 WaitingForLateDone = false; // 韌體重新開機，不會再有舊段的回報
                 if (State == SessionState.RunningSegment && entry == _expectedEntry)
                 {
-                    // 段執行中重開機：這一段到此為止，仍讓研究人員記下面板讀數
-                    CurrentSegment.Rebooted = true;
+                    // 段執行中重開機：傳送到此為止，仍讓研究人員記下面板讀數
                     if (_paced != null)
                     {
-                        CurrentSegment.ReportedCount = CurrentSegment.Replies;
+                        _paced.MarkRemaining(block => block.Rebooted = true);
+                        ReportFromReplies();
                         EndPaced();
+                    }
+                    else
+                    {
+                        CurrentSegment.Rebooted = true;
                     }
                     State = SessionState.AwaitingReading;
                     return;

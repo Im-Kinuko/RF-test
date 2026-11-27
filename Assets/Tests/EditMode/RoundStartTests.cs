@@ -23,10 +23,10 @@ namespace StressTest.Tests
         }
 
         [Test]
-        public void DefaultConfig_BootsAtOneAndWarmsUpTenPressesToTwo()
+        public void RunControlConfig_BootsAtOneAndWarmsUpTenPressesToTwo()
         {
             // XTERRA DT168：開機 1.0 km/h，也是最低速度；到 2.0 是 10 格
-            var config = new RoundConfig(gapMs: 5, totalCount: 40);
+            var config = new RoundConfig(gapMs: 5, totalCount: 40) { Mode = SendMode.Burst };
             var plan = RoundPlan.Create(config.TotalCount, config.SegmentSize, config.BaseSpeed);
 
             Assert.That(config.BootSpeed, Is.EqualTo(1.0));
@@ -38,13 +38,13 @@ namespace StressTest.Tests
         }
 
         [Test]
-        public void DefaultRound_SendsTenWarmupUps()
+        public void RunControlRound_SendsTenWarmupUps()
         {
             var arduino = new FakeArduino();
             var session = new StressTestSession(arduino, EntryType.Opto);
             session.BeginHandshake(0.0);
             session.Poll(0.1);
-            var round = new TestRound(session, new RoundConfig(gapMs: 5, totalCount: 40), "R1");
+            var round = new TestRound(session, new RoundConfig(gapMs: 5, totalCount: 40) { Mode = SendMode.Burst }, "R1");
 
             round.Start(1.0);
             for (var now = 1.1; now < 30 && round.State != RoundState.AwaitingWarmupReading; now += 0.1) round.Tick(now);

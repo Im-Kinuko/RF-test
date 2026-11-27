@@ -17,7 +17,7 @@ namespace StressTest.Core
             "recorded_at,round_id,entry,firmware_version,firmware_params,gap_ms,total_count,segment_size,segments," +
             "total_sent,total_drops,warmup_reading,end_reading,any_possibly_clamped,any_report_short,mean_gap_us,max_gap_us," +
             "up_planned,down_planned,up_sent,down_sent,warmup_up,warmup_down," +
-            "send_mode,pc_sent,arduino_received,arduino_executed,link_lost,treadmill_missing,any_rebooted," +
+            "send_mode,flow,pc_sent,arduino_received,arduino_executed,arduino_bad,link_lost,treadmill_missing,any_rebooted," +
             "status,void_reason";
 
         private readonly CommandCsvWriter _commands;
@@ -43,8 +43,20 @@ namespace StressTest.Core
         public void WriteSegment(string roundId, RoundConfig config, FirmwareInfo firmware, int segmentIndex, SegmentResult result)
         {
             _commands.Write(result.Segment, firmware.Entry, roundId, config.TotalCount, segmentIndex);
-            _segments.Write(result, firmware.Entry, firmware.Version, _clock(), roundId, segmentIndex);
+            WriteSegmentResult(roundId, firmware, segmentIndex, result);
         }
+
+        /// <summary>連續傳送的逐筆紀錄：整輪送完（或中止）時一次寫入，不等面板讀數。</summary>
+        public void WriteCommands(string roundId, RoundConfig config, FirmwareInfo firmware, PacedRun run)
+        {
+            for (var i = 0; i < run.Blocks.Count; i++)
+            {
+                _commands.Write(run.Blocks[i], firmware.Entry, roundId, config.TotalCount, i);
+            }
+        }
+
+        public void WriteSegmentResult(string roundId, FirmwareInfo firmware, int segmentIndex, SegmentResult result) =>
+            _segments.Write(result, firmware.Entry, firmware.Version, _clock(), roundId, segmentIndex);
 
         public void WriteRound(string roundId, RoundConfig config, FirmwareInfo firmware, RoundSummary summary, string status,
             string voidReason = null)
@@ -77,9 +89,11 @@ namespace StressTest.Core
                 summary.WarmupUpSent.ToString(c),
                 summary.WarmupDownSent.ToString(c),
                 config.Mode.Code(),
+                CsvFormat.Flow(config.IsContinuous),
                 CsvFormat.Count(summary.PcSent),
                 CsvFormat.Count(summary.ArduinoReceived),
                 CsvFormat.Count(summary.ArduinoExecuted),
+                CsvFormat.Count(summary.ArduinoBad),
                 CsvFormat.Count(summary.LinkLost),
                 CsvFormat.Count(summary.TreadmillMissing),
                 CsvFormat.Flag(summary.AnyRebooted),

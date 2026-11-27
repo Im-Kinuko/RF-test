@@ -4,15 +4,13 @@ using System.Globalization;
 namespace StressTest.Core
 {
     /// <summary>
-    /// A 送法的一段：ZERO →（CMD → 完成回覆 → 等 gap）× n → STAT。
+    /// A 送法的一次傳送：ZERO →（CMD → 完成回覆 → 等 gap）× 總筆數 → STAT；換段（換方向）不停。
     /// 指令不重送，重送會改變次數；ZERO 與 STAT 不影響跑步機，沒有回覆時重問。
     /// </summary>
     internal sealed class PacedSender
     {
         private enum Phase { Zeroing, Resting, AwaitingReply, Querying, Finished }
 
-        /// <summary>連續這麼多筆沒有回覆就結束這一段。</summary>
-        public const int MaxConsecutiveNoReply = 3;
         private const int MaxControlAttempts = 3;
         private const double ControlTimeoutSeconds = 1.0;
         /// <summary>
@@ -23,7 +21,8 @@ namespace StressTest.Core
         private const double TimeEpsilon = 1e-9;
 
         private readonly ISerialLink _link;
-        private readonly SegmentRun _segment;
+        private readonly PacedRun _run;
+        private readonly int _gapMs;
         private readonly double _replyTimeout;
         private long _sequence;
 
@@ -33,11 +32,14 @@ namespace StressTest.Core
         private int _controlAttempts;
         private int _consecutiveNoReply;
         private bool _countersZeroed;
+        private int _blockIndex;
+        private CommandRecord _current;
 
-        public PacedSender(ISerialLink link, SegmentRun segment, int actionMs, long lastSequence)
+        public PacedSender(ISerialLink link, PacedRun run, int actionMs, long lastSequence)
         {
             _link = link;
-            _segment = segment;
+            _run = run;
+            _gapMs = run.Blocks[0].GapMs;
             _replyTimeout = actionMs * 2 / 1000.0 + 1.0;
             _sequence = lastSequence;
         }
@@ -46,6 +48,15 @@ namespace StressTest.Core
         public long LastSequence => _sequence;
 
         public bool IsFinished => _phase == Phase.Finished;
+
+        /// <summary>正在傳送（或最後傳送）的段。</summary>
+        public SegmentRun CurrentBlock => _run.Blocks[_blockIndex];
+
+        /// <summary>目前段與之後的段標記同一個狀況（這些段沒有完整跑完）。</summary>
+        public void MarkRemaining(Action<SegmentRun> mark)
+        {
+            for (var i = _blockIndex; i < _run.Blocks.Count; i++) mark(_run.Blocks[i]);
+        }
 
         public void Start(double now)
         {
@@ -96,16 +107,16 @@ namespace StressTest.Core
 
                 case Phase.Resting:
                     if (now < _sendAt - TimeEpsilon) return;
-                    if (_segment.PcSent < _segment.Count) SendCommand(now);
+                    if (MoveToUnfinishedBlock()) SendCommand(now);
                     else BeginQuery(now);
                     break;
 
                 case Phase.AwaitingReply:
                     if (now <= _deadline) return;
-                    Current.Status = CommandStatus.NoReply;
-                    if (++_consecutiveNoReply >= MaxConsecutiveNoReply)
+                    _current.Status = CommandStatus.NoReply;
+                    if (++_consecutiveNoReply >= PacedRun.MaxConsecutiveNoReply)
                     {
-                        _segment.TimedOut = true;
+                        MarkRemaining(block => block.TimedOut = true);
                         BeginQuery(now);
                     }
                     else
@@ -123,7 +134,16 @@ namespace StressTest.Core
             }
         }
 
-        private CommandRecord Current => _segment.Commands[_segment.Commands.Count - 1];
+        /// <summary>目前這段送完就換下一段；全部送完回傳 false。換段不增加等待。</summary>
+        private bool MoveToUnfinishedBlock()
+        {
+            while (CurrentBlock.PcSent >= CurrentBlock.Count)
+            {
+                if (_blockIndex + 1 >= _run.Blocks.Count) return false;
+                _blockIndex++;
+            }
+            return true;
+        }
 
         private void RestUntil(double time)
         {
@@ -148,11 +168,13 @@ namespace StressTest.Core
 
         private void SendCommand(double now)
         {
-            var record = new CommandRecord(++_sequence, _segment.PcSent, now);
-            _segment.AddCommand(record);
+            var block = CurrentBlock;
+            var record = new CommandRecord(++_sequence, block.PcSent, now);
+            block.AddCommand(record);
+            _current = record;
             _phase = Phase.AwaitingReply;
             _deadline = now + _replyTimeout;
-            var direction = _segment.Direction == SegmentDirection.Up ? "UP" : "DOWN";
+            var direction = block.Direction == SegmentDirection.Up ? "UP" : "DOWN";
             _link.WriteLine(LineChecksum.Wrap(
                 $"CMD,{record.Sequence.ToString(CultureInfo.InvariantCulture)},{direction}"));
         }
@@ -160,9 +182,9 @@ namespace StressTest.Core
         private void Reject(double now)
         {
             if (_phase != Phase.AwaitingReply) return;
-            Current.Status = CommandStatus.Rejected;
+            _current.Status = CommandStatus.Rejected;
             _consecutiveNoReply = 0; // Arduino 還活著
-            RestUntil(now + Math.Max(RejectSettleSeconds, _segment.GapMs / 1000.0));
+            RestUntil(now + Math.Max(RejectSettleSeconds, _gapMs / 1000.0));
         }
 
         // X,<seq>,<rx_us>,<start_us>,<end_us>
@@ -176,24 +198,30 @@ namespace StressTest.Core
             }
 
             CommandRecord record = null;
-            foreach (var c in _segment.Commands)
+            SegmentRun owner = null;
+            foreach (var block in _run.Blocks)
             {
-                if (c.Sequence == sequence) record = c;
+                foreach (var c in block.Commands)
+                {
+                    if (c.Sequence != sequence) continue;
+                    record = c;
+                    owner = block;
+                }
             }
-            if (record == null || record.PcReplySeconds != null) return; // 別段的遲到回覆或重複
+            if (record == null || record.PcReplySeconds != null) return; // 別次傳送的遲到回覆或重複
 
-            var waitingForIt = _phase == Phase.AwaitingReply && record == Current;
+            var waitingForIt = _phase == Phase.AwaitingReply && record == _current;
             record.Status = waitingForIt ? CommandStatus.Done : CommandStatus.Late;
             record.PcReplySeconds = now;
             record.RxMicros = rx;
             record.StartMicros = start;
             record.EndMicros = end;
-            _segment.AddTimestamp(new CommandTimestamp(record.Position, start, end));
-            _segment.Replies++;
+            owner.AddTimestamp(new CommandTimestamp(record.Position, start, end));
+            owner.Replies++;
 
             if (!waitingForIt) return; // 遲到的回覆不算恢復正常
             _consecutiveNoReply = 0;
-            RestUntil(now + _segment.GapMs / 1000.0);
+            RestUntil(now + _gapMs / 1000.0);
         }
 
         // STAT,<received>,<executed>,<bad>
@@ -207,13 +235,52 @@ namespace StressTest.Core
             }
 
             // 計數比收到的回覆還少，代表中途歸零過（例如重開機但 READY 遺失），不能採信
-            if (_countersZeroed && received >= _segment.Replies && executed >= _segment.Replies)
+            if (_countersZeroed && received >= _run.Replies && executed >= _run.Replies)
             {
-                _segment.ArduinoReceived = received;
-                _segment.ArduinoExecuted = executed;
-                _segment.ArduinoBad = bad;
+                _run.ArduinoReceived = received;
+                _run.ArduinoExecuted = executed;
+                _run.ArduinoBad = bad;
+                ShareAmongBlocks(received, executed, bad);
             }
             _phase = Phase.Finished;
+        }
+
+        /// <summary>
+        /// STAT 只有合計。多段時只在能確定歸屬時分給各段：沒回覆的指令全都沒做，或全都做了。
+        /// </summary>
+        private void ShareAmongBlocks(int received, int executed, int bad)
+        {
+            if (_run.Blocks.Count == 1)
+            {
+                var only = _run.Blocks[0];
+                only.ArduinoReceived = received;
+                only.ArduinoExecuted = executed;
+                only.ArduinoBad = bad;
+                return;
+            }
+
+            var noReply = 0;
+            var rejected = 0;
+            foreach (var block in _run.Blocks)
+            {
+                noReply += block.CountWithStatus(CommandStatus.NoReply);
+                rejected += block.CountWithStatus(CommandStatus.Rejected);
+            }
+            var replies = _run.Replies;
+
+            int? Share(int total, SegmentRun block)
+            {
+                if (total == replies) return block.Replies;
+                if (total == replies + noReply) return block.Replies + block.CountWithStatus(CommandStatus.NoReply);
+                return null;
+            }
+
+            foreach (var block in _run.Blocks)
+            {
+                block.ArduinoReceived = Share(received, block);
+                block.ArduinoExecuted = Share(executed, block);
+                block.ArduinoBad = bad == rejected ? block.CountWithStatus(CommandStatus.Rejected) : (int?)null;
+            }
         }
     }
 }

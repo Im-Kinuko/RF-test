@@ -74,14 +74,20 @@ namespace StressTest.Runtime
         private void DrawRound()
         {
             var r = _round;
+            var continuous = r.Config.IsContinuous;
             var segmentText = r.State == RoundState.RunningSegment || r.State == RoundState.AwaitingSegmentReading
                 || r.State == RoundState.ConfirmingSegmentReading
                 ? $"　段 {r.SegmentIndex + 1}／{r.Plan.Segments.Count}"
                 : "";
-            GUILayout.Label($"本輪（{r.Config.Mode.Code()}）：間隔 {r.Config.GapMs} ms、{r.Config.TotalCount} 次{segmentText}", _title);
+            var flow = continuous ? "，中間不停" : "";
             GUILayout.Label(
-                $"加速 已送 {r.UpSent}／預計 {r.Plan.UpCount}　減速 已送 {r.DownSent}／預計 {r.Plan.DownCount}" +
-                (r.WarmupUpSent + r.WarmupDownSent > 0 ? $"　預熱 加速 {r.WarmupUpSent}、減速 {r.WarmupDownSent}" : ""),
+                $"本輪（{r.Config.Mode.Code()}）：間隔 {r.Config.GapMs} ms、{r.Config.TotalCount} 次{flow}{segmentText}", _title);
+            var warmup = r.WarmupUpSent + r.WarmupDownSent > 0
+                ? $"　預熱 加速 {r.WarmupUpSent}、減速 {r.WarmupDownSent}"
+                : "";
+            GUILayout.Label(continuous
+                    ? $"預計加速 {r.Plan.UpCount}、減速 {r.Plan.DownCount}，共 {r.Plan.Segments.Count} 段{warmup}"
+                    : $"加速 已送 {r.UpSent}／預計 {r.Plan.UpCount}　減速 已送 {r.DownSent}／預計 {r.Plan.DownCount}{warmup}",
                 _body);
             GUILayout.Label("輪次 ID：" + r.RoundId, _small);
             GUILayout.Space(Px(12));
@@ -106,7 +112,11 @@ namespace StressTest.Runtime
 
                 case RoundState.ConfirmingWarmupReading:
                     GUILayout.Label($"你輸入的面板速度：{r.EnteredReading:F1} km/h", _huge);
-                    DrawConfirmKeys("確認，開始第一段");
+                    if (continuous)
+                    {
+                        GUILayout.Label($"確認後會連續送出 {r.Config.TotalCount} 筆，中間不停。請先開始錄影，畫面要拍到跑步機面板。", _title);
+                    }
+                    DrawConfirmKeys(continuous ? "已開始錄影，開始送出" : "確認，開始第一段");
                     break;
 
                 case RoundState.ConfirmingSegmentReading:
@@ -117,6 +127,10 @@ namespace StressTest.Runtime
                 case RoundState.WarmupMismatch:
                     var reading = r.WarmupReading ?? 0;
                     GUILayout.Label($"面板是 {reading:F1} km/h，預期 {r.Config.BaseSpeed:F1} km/h", _huge);
+                    if (continuous)
+                    {
+                        GUILayout.Label("選「以此為起點繼續」會立刻連續送出，請先開始錄影。", _title);
+                    }
                     GUILayout.BeginHorizontal();
                     PrimaryButton("重新預熱（補足差額）", () => r.Rewarm(MonotonicClock.Now));
                     if (GUILayout.Button($"以 {reading:F1} 為起點繼續", _big)) r.ContinueFromReading(MonotonicClock.Now);
@@ -125,9 +139,38 @@ namespace StressTest.Runtime
 
                 case RoundState.RunningSegment:
                     var planned = r.Plan.Segments[r.SegmentIndex];
+                    if (continuous)
+                    {
+                        DrawContinuousProgress(r, planned);
+                        break;
+                    }
                     GUILayout.Label($"執行中：{DirectionLabels[(int)planned.Direction]} {planned.Count} 筆", _huge);
                     if (_session.CurrentSegment != null) DrawSegmentProgress(_session.CurrentSegment);
                     GUILayout.Label("執行期間請勿操作，完成後會請你輸入面板速度。", _body);
+                    break;
+
+                case RoundState.AwaitingFinalReading:
+                    GUILayout.Label(r.TreadmillStopped ? "修改最後速度（跑步機已停止）" : "整輪送完了，跑步機還在轉。", _title);
+                    DrawRunWarning(r.Run);
+                    DrawReadingInput(
+                        r.TreadmillStopped
+                            ? $"送完當下的速度（預期 {r.ExpectedPanelSpeed:F1}）"
+                            : $"請看面板，現在的速度（預期 {r.ExpectedPanelSpeed:F1}）",
+                        r.ExpectedPanelSpeed, speed => r.EnterReading(speed));
+                    if (!r.TreadmillStopped) GUILayout.Label("確認後程式會停止跑步機。", _body);
+                    break;
+
+                case RoundState.ConfirmingFinalReading:
+                    GUILayout.Label($"最後速度：{r.EnteredReading:F1} km/h", _huge);
+                    DrawConfirmKeys(r.TreadmillStopped ? "確認" : "確認，停止跑步機");
+                    break;
+
+                case RoundState.AwaitingTurnReading:
+                    DrawTurnReading(r);
+                    break;
+
+                case RoundState.ConfirmingReadings:
+                    DrawReadingsReview(r);
                     break;
 
                 case RoundState.WaitingForLateDone:
@@ -152,10 +195,126 @@ namespace StressTest.Runtime
 
                 case RoundState.Failed:
                     GUILayout.Label("本輪中斷：" + r.FailureReason, _title);
-                    GUILayout.Label("已確認的段已寫入紀錄，本輪會記為作廢。請確認跑步機狀態後重新開始。", _body);
+                    GUILayout.Label(continuous
+                        ? "本輪會記為作廢。整輪已送完或按過緊急停止時，逐筆紀錄有保存。請確認跑步機狀態後重新開始。"
+                        : "已確認的段已寫入紀錄，本輪會記為作廢。請確認跑步機狀態後重新開始。", _body);
                     DrawFinishButtons(r, "回到設定");
                     break;
             }
+        }
+
+        // ===== A 送法的畫面 =====
+
+        private void DrawContinuousProgress(TestRound r, PlannedSegment planned)
+        {
+            var run = _session.CurrentRun;
+            GUILayout.Label(
+                $"連續送出中：第 {r.SegmentIndex + 1}／{r.Plan.Segments.Count} 段（{DirectionLabels[(int)planned.Direction]}）", _huge);
+            if (run != null)
+            {
+                GUILayout.Label($"已送 {run.PcSent}／{r.Config.TotalCount} 筆、已回覆 {run.Replies} 筆", _title);
+                DrawProgressBar((float)run.Replies / r.Config.TotalCount);
+            }
+            GUILayout.Label(
+                $"速度在 {r.Plan.Segments[0].ExpectedStartSpeed:F1} 和 {r.Plan.Segments[0].ExpectedEndSpeed:F1} 之間來回。" +
+                "現在不用操作，確認手機正在錄影。", _body);
+        }
+
+        private void DrawRunWarning(PacedRun run)
+        {
+            if (run == null) return;
+            if (run.AnyRebooted) GUILayout.Label("注意：Arduino 重新開機過。仍請照實輸入面板速度，這一輪之後要作廢。", _title);
+            if (run.AnyTimedOut)
+            {
+                GUILayout.Label(
+                    $"注意：連續 {PacedRun.MaxConsecutiveNoReply} 筆沒有回覆，傳送提早結束。仍請輸入面板速度。", _title);
+            }
+            if (run.PcSent < run.Count)
+                GUILayout.Label("沒有送完全部指令，這一輪會自動作廢。只需要輸入有送出的段。", _title);
+            if (run.Replies < run.Count)
+            {
+                GUILayout.Label(
+                    $"電腦送出 {run.PcSent}／{run.Count} 筆，收到回覆 {run.Replies} 筆，Arduino 執行 {Show(run.ArduinoExecuted)} 筆。" +
+                    "指令遺失是要收集的資料。", _body);
+            }
+        }
+
+        private void DrawTurnReading(TestRound r)
+        {
+            var e = Event.current;
+            if (e.type == EventType.KeyDown && e.keyCode == KeyCode.Escape)
+            {
+                _readingText = "";
+                r.Undo();
+                e.Use();
+                return;
+            }
+
+            var index = r.TurnIndex;
+            var block = r.Plan.Segments[index];
+            var turnName = block.Direction == SegmentDirection.Up ? "最高點" : "最低點";
+            GUILayout.Label($"看錄影：轉向點 {index + 1}／{r.TurnCount}", _huge);
+            DrawStopWarning(r);
+            if (r.IsVoided) GUILayout.Label($"本輪會記為作廢：{r.VoidReason}", _body);
+            GUILayout.Label(
+                $"找第 {index + 1} 段（{DirectionLabels[(int)block.Direction]}）結束、換方向時面板的{turnName}。跑步機已停，可以慢慢看。", _title);
+            GUILayout.Label($"最後速度 {r.FinalReading:F1}　已輸入：{ReadingList(r)}", _body);
+            DrawReadingInput($"{turnName}（預期 {r.ExpectedPanelSpeed:F1}）", r.ExpectedPanelSpeed, speed =>
+            {
+                r.EnterReading(speed);
+                _readingText = "";
+            });
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("回上一個（Esc）", _big, GUILayout.Width(Px(220))))
+            {
+                _readingText = "";
+                r.Undo();
+            }
+            DrawGiveUpButton(r);
+            GUILayout.EndHorizontal();
+            GUILayout.Label("看不清楚時不要猜。輸入完之前不要關程式。", _small);
+        }
+
+        private void DrawStopWarning(TestRound r)
+        {
+            if (r.StopWarning == null) return;
+            GUILayout.Label($"停止指令沒有回覆（{r.StopWarning}）。請確認跑帶已停，沒停就按跑步機上的停止鍵。", _title);
+        }
+
+        private void DrawGiveUpButton(TestRound r)
+        {
+            if (GUILayout.Button("讀不到，作廢此輪", _big, GUILayout.Width(Px(240)))) r.GiveUpReadings();
+        }
+
+        private static string ReadingList(TestRound r)
+        {
+            if (r.TurnReadings.Count == 0) return "（還沒有）";
+            var parts = new string[r.TurnReadings.Count];
+            for (var i = 0; i < parts.Length; i++) parts[i] = r.TurnReadings[i].ToString("F1");
+            return string.Join("、", parts);
+        }
+
+        private void DrawReadingsReview(TestRound r)
+        {
+            var results = r.PendingResults;
+            if (results == null) return;
+            GUILayout.Label("請核對各段結果", _huge);
+            DrawStopWarning(r);
+            if (r.IsVoided) GUILayout.Label($"本輪會記為作廢：{r.VoidReason}", _title);
+            for (var i = 0; i < results.Count; i++) GUILayout.Label(SegmentLine(i, results[i]), _body);
+            DrawConfirmKeys("確認，完成本輪");
+            DrawGiveUpButton(r);
+        }
+
+        private string SegmentLine(int index, SegmentResult result)
+        {
+            var flags = (result.PossiblyClamped ? "　可能觸底／觸頂" : "") + (result.Segment.ReportShort ? "　回報不足" : "")
+                        + (result.Segment.Rebooted ? "　重新開機" : "");
+            var hops = result.Segment.Mode == SendMode.Ack
+                ? $"（序列端少 {Show(result.LinkLost)}、跑步機端少 {Show(result.TreadmillMissing)}）"
+                : "";
+            return $"段 {index + 1}：{DirectionLabels[(int)result.Segment.Direction]} {result.Segment.Count} 筆，" +
+                   $"{result.Segment.StartSpeed:F1} → {result.ActualEndSpeed:F1}，掉包 {result.Drops}{hops}{flags}";
         }
 
         private string _voidReasonText = "";
@@ -317,17 +476,10 @@ namespace StressTest.Runtime
 
         private void DrawRoundSummary(RoundSummary summary)
         {
-            GUILayout.Label($"本輪完成：總掉包 {summary.TotalDrops}／{summary.TotalSent} 筆", _huge);
-            for (var i = 0; i < summary.Results.Count; i++)
-            {
-                var result = summary.Results[i];
-                var flags = (result.PossiblyClamped ? "　可能觸底／觸頂" : "") + (result.Segment.ReportShort ? "　回報不足" : "")
-                            + (result.Segment.Rebooted ? "　重新開機" : "");
-                GUILayout.Label(
-                    $"段 {i + 1}：{DirectionLabels[(int)result.Segment.Direction]} {result.Segment.Count} 筆，" +
-                    $"{result.Segment.StartSpeed:F1} → {result.ActualEndSpeed:F1}，掉包 {result.Drops}{flags}",
-                    _small);
-            }
+            GUILayout.Label(summary.Results.Count > 0
+                ? $"本輪完成：總掉包 {summary.TotalDrops}／{summary.TotalSent} 筆"
+                : "本輪沒有各段結果", _huge);
+            for (var i = 0; i < summary.Results.Count; i++) GUILayout.Label(SegmentLine(i, summary.Results[i]), _small);
             if (summary.PcSent != null)
             {
                 GUILayout.Label(

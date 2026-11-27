@@ -8,8 +8,9 @@ namespace StressTest.Core
     public sealed class RoundSummary
     {
         public RoundSummary(IReadOnlyList<SegmentResult> results, double? warmupReading, RoundPlan plan,
-            int warmupUpSent, int warmupDownSent)
+            int warmupUpSent, int warmupDownSent, PacedRun run = null)
         {
+            _run = run;
             Results = results;
             WarmupReading = warmupReading;
             UpPlanned = plan.UpCount;
@@ -17,7 +18,9 @@ namespace StressTest.Core
             WarmupUpSent = warmupUpSent;
             WarmupDownSent = warmupDownSent;
 
-            var gaps = results.SelectMany(r => r.Segment.Gaps).ToList();
+            // 讀不到轉向點而沒有各段結果時，實際間隔仍可從傳送紀錄算出
+            var segments = run != null ? run.Blocks : results.Select(r => r.Segment);
+            var gaps = segments.SelectMany(s => s.Gaps).ToList();
             MeanGapMicros = gaps.Count > 0 ? gaps.Average() : 0;
             MaxGapMicros = gaps.Count > 0 ? gaps.Max() : 0;
         }
@@ -29,7 +32,9 @@ namespace StressTest.Core
         public double? WarmupReading { get; }
         public double? EndReading => Results.Count > 0 ? Results[Results.Count - 1].ActualEndSpeed : (double?)null;
         public bool AnyPossiblyClamped => Results.Any(r => r.PossiblyClamped);
-        public bool AnyReportShort => Results.Any(r => r.Segment.ReportShort);
+        public bool AnyReportShort => _run != null
+            ? _run.Blocks.Any(b => b.ReportShort)
+            : Results.Any(r => r.Segment.ReportShort);
         public double MeanGapMicros { get; }
         public long MaxGapMicros { get; }
 
@@ -46,12 +51,19 @@ namespace StressTest.Core
         public int WarmupDownSent { get; }
 
         /// <summary>A 送法各檢查點的整輪合計；沒有任何段、或任一段不明時為 null。</summary>
-        public int? PcSent => Total(r => r.Segment.Mode == SendMode.Ack ? r.Segment.PcSent : (int?)null);
-        public int? ArduinoReceived => Total(r => r.Segment.ArduinoReceived);
-        public int? ArduinoExecuted => Total(r => r.Segment.ArduinoExecuted);
-        public int? LinkLost => Total(r => r.LinkLost);
-        public int? TreadmillMissing => Total(r => r.TreadmillMissing);
-        public bool AnyRebooted => Results.Any(r => r.Segment.Rebooted);
+        public int? PcSent => _run != null
+            ? _run.PcSent
+            : Total(r => r.Segment.Mode == SendMode.Ack ? r.Segment.PcSent : (int?)null);
+        public int? ArduinoReceived => _run != null ? _run.ArduinoReceived : Total(r => r.Segment.ArduinoReceived);
+        public int? ArduinoExecuted => _run != null ? _run.ArduinoExecuted : Total(r => r.Segment.ArduinoExecuted);
+        public int? ArduinoBad => _run != null ? _run.ArduinoBad : Total(r => r.Segment.ArduinoBad);
+        public int? LinkLost => _run != null ? _run.PcSent - _run.ArduinoReceived : Total(r => r.LinkLost);
+        public int? TreadmillMissing => _run == null
+            ? Total(r => r.TreadmillMissing)
+            : Results.Count == 0 ? null : _run.ArduinoExecuted - Results.Sum(r => r.PanelSteps);
+        public bool AnyRebooted => _run != null ? _run.AnyRebooted : Results.Any(r => r.Segment.Rebooted);
+
+        private readonly PacedRun _run;
 
         private int? Total(Func<SegmentResult, int?> value)
         {

@@ -8,7 +8,7 @@ namespace StressTest.Tests
         private const string Header = "﻿" + RoundCsvLog.RoundsHeader;
 
         private static string Row(string entry, int gap, int count, string status) =>
-            $"2026-11-27 10:00:00,R,{entry},0.5.0,press_ms=120,{gap},{count},20,2,40,0,2.0,2.0,0,0,5008.0,5008,20,20,20,20,10,0,A,40,40,40,0,0,0,{status},";
+            $"2026-11-27 10:00:00,R,{entry},0.5.0,press_ms=120,{gap},{count},20,2,40,0,2.0,2.0,0,0,5008.0,5008,20,20,20,20,10,0,A,continuous,40,40,40,0,0,0,0,{status},";
 
         [Test]
         public void CountsOnlyCompletedRows()

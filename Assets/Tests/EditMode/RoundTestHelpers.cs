@@ -44,12 +44,12 @@ namespace StressTest.Tests
 
         public int Sent(string line) => Arduino.Received.Count(l => l == line);
 
-        /// <summary>從開始一路推進到輸入預熱讀數並確認為 1.0。</summary>
+        /// <summary>從開始一路推進到輸入預熱讀數並確認為起點速度。</summary>
         public void StartAndWarmUp()
         {
             Start();
             AdvanceUntil(RoundState.AwaitingWarmupReading);
-            Round.EnterReading(1.0);
+            Round.EnterReading(Round.Config.BaseSpeed);
             Round.Confirm(Now);
         }
 

@@ -32,7 +32,7 @@ namespace StressTest.Runtime
             _matrix.Mode = _mode;
             // 舊版偏好可能超過現在的上限，超過就回到預設
             var size = PlayerPrefs.GetInt(PrefSegmentSize, RoundConfig.DefaultSegmentSize);
-            if (size < 1 || size > RoundConfig.MaxSegmentSize) size = RoundConfig.DefaultSegmentSize;
+            if (size < 1 || size > RoundConfig.MaxSegmentSizeFor(_mode)) size = RoundConfig.DefaultSegmentSize;
             _segmentSizeText = size.ToString();
         }
 
@@ -80,8 +80,8 @@ namespace StressTest.Runtime
         private bool TryReadSegmentSize(out int segmentSize)
         {
             if (int.TryParse(_segmentSizeText, out segmentSize) && segmentSize >= 1
-                && segmentSize <= RoundConfig.MaxSegmentSize) return true;
-            _roundMessage = $"每段筆數請輸入 1～{RoundConfig.MaxSegmentSize}。";
+                && segmentSize <= RoundConfig.MaxSegmentSizeFor(_mode)) return true;
+            _roundMessage = $"每段筆數請輸入 1～{RoundConfig.MaxSegmentSizeFor(_mode)}。";
             return false;
         }
 
@@ -97,8 +97,8 @@ namespace StressTest.Runtime
             _mode = GUILayout.Toolbar(_mode == SendMode.Ack ? 0 : 1, ModeLabels, _big) == 0 ? SendMode.Ack : SendMode.Burst;
             _matrix.Mode = _mode;
             GUILayout.Label(_mode == SendMode.Ack
-                ? "電腦逐筆送，收到完成回覆後等 gap 再送下一筆。"
-                : "對照組：電腦送一行，Arduino 自己連續送完整段。", _small);
+                ? "電腦逐筆送，整輪中間不停；送完看錄影輸入轉向點讀數。"
+                : "對照組：Arduino 一次送一段，每段停下來讀面板。", _small);
             GUILayout.BeginHorizontal();
             GUILayout.Label("每條件輪數", _body, GUILayout.Width(Px(110)));
             _repetitionsText = GUILayout.TextField(_repetitionsText, _input, GUILayout.Width(Px(70)));
@@ -165,22 +165,30 @@ namespace StressTest.Runtime
             }
 
             GUILayout.Label($"下一輪（{_mode.Code()}）：{EntryLabels[(int)connected]}、間隔 {next.GapMs} ms、{next.TotalCount} 次", _huge);
-            var sizeValid = int.TryParse(_segmentSizeText, out var size) && size >= 1 && size <= RoundConfig.MaxSegmentSize;
+            var maxSize = RoundConfig.MaxSegmentSizeFor(_mode);
+            var sizeValid = int.TryParse(_segmentSizeText, out var size) && size >= 1 && size <= maxSize;
             var config = new RoundConfig(next.GapMs, next.TotalCount, sizeValid ? size : RoundConfig.DefaultSegmentSize)
                 { Mode = _mode };
             var plan = RoundPlan.Create(config.TotalCount, config.SegmentSize, config.BaseSpeed);
             if (sizeValid)
             {
-                GUILayout.Label($"加速 {plan.UpCount} 次、減速 {plan.DownCount} 次，分 {plan.Segments.Count} 段（每段 {size} 筆）", _title);
+                var how = config.IsContinuous ? "，每段換方向、中間不停" : "";
+                GUILayout.Label(
+                    $"加速 {plan.UpCount} 次、減速 {plan.DownCount} 次，分 {plan.Segments.Count} 段（每段 {size} 筆）{how}", _title);
             }
             else
             {
-                GUILayout.Label($"每段筆數請輸入 1～{RoundConfig.MaxSegmentSize}。", _title);
+                GUILayout.Label($"每段筆數請輸入 1～{maxSize}。", _title);
             }
             GUILayout.Label(
                 $"第 {next.Repetition} 輪。開始後會自動啟動跑步機（開機 {config.BootSpeed:F1} km/h），" +
                 $"預熱加速 {config.WarmupCount} 次到 {config.BaseSpeed:F1} 後開始計分" +
                 $"（{config.BaseSpeed:F1}↔{plan.Segments[0].ExpectedEndSpeed:F1}）。跑帶上請不要站人。", _body);
+            if (config.IsContinuous)
+            {
+                GUILayout.Label(
+                    $"請先架好錄影。送完後要輸入最後速度，再看影片輸入 {plan.Segments.Count - 1} 個轉向點。", _title);
+            }
             var unsupported = TestRound.CheckFirmware(_session.Firmware, config);
             if (unsupported != null) GUILayout.Label(unsupported, _title);
 

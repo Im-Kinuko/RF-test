@@ -58,7 +58,8 @@ namespace StressTest.Core
         public int UpSent => RoundSummary.SentCount(_results, SegmentDirection.Up);
         public int DownSent => RoundSummary.SentCount(_results, SegmentDirection.Down);
 
-        private RoundSummary NewSummary() => new RoundSummary(_results, WarmupReading, Plan, WarmupUpSent, WarmupDownSent);
+        private RoundSummary NewSummary() =>
+            new RoundSummary(_results, WarmupReading, Plan, WarmupUpSent, WarmupDownSent, _run);
 
         /// <summary>目前要研究人員核對的面板速度。</summary>
         public double ExpectedPanelSpeed { get; private set; }
@@ -118,7 +119,11 @@ namespace StressTest.Core
                     break;
 
                 case RoundState.RunningSegment:
-                    if (_session.State == SessionState.AwaitingReading)
+                    if (_session.State == SessionState.AwaitingReading && Config.IsContinuous)
+                    {
+                        FinishContinuousRun();
+                    }
+                    else if (_session.State == SessionState.AwaitingReading)
                     {
                         ExpectedPanelSpeed = _session.CurrentSegment.ExpectedEndSpeed;
                         State = RoundState.AwaitingSegmentReading;
@@ -150,8 +155,15 @@ namespace StressTest.Core
 
                 case RoundState.Stopping:
                     // 停止指令已 ACK
-                    Summary = NewSummary();
-                    State = RoundState.Completed;
+                    if (_finalReading.HasValue)
+                    {
+                        AskNextTurnOrReview();
+                    }
+                    else
+                    {
+                        Summary = NewSummary();
+                        State = RoundState.Completed;
+                    }
                     break;
             }
         }
@@ -176,6 +188,13 @@ namespace StressTest.Core
                 return;
             }
 
+            if (TreadmillStopped)
+            {
+                // 傳送已結束、最後速度已確認：再送一次停止就好，不丟掉這一輪
+                _session.SendSingle(SingleCommand.Stop);
+                return;
+            }
+
             IsVoided = true;
             VoidReason = "緊急停止";
             if (State == RoundState.Stopping) return; // 停止指令已送出
@@ -185,11 +204,34 @@ namespace StressTest.Core
             {
                 _abortDeadline = now + AbortWaitSeconds;
                 State = RoundState.Aborting;
-                return;
+            }
+            else
+            {
+                _session.DiscardSegment();
+                BeginStop(now);
             }
 
-            _session.DiscardSegment();
-            BeginStop(now);
+            // 停止指令送出之後才寫檔：寫檔出錯不能擋住停止。中止的整輪仍保留逐筆紀錄
+            LogRunCommandsOnce();
+        }
+
+        /// <summary>
+        /// 介面層即將中斷連線或關閉程式：盡量停止跑步機、保留逐筆紀錄，本輪記為失敗（作廢）。
+        /// </summary>
+        public void Abandon(string reason)
+        {
+            if (State == RoundState.Idle || State == RoundState.Completed || State == RoundState.Failed) return;
+
+            if (!TreadmillStopped)
+            {
+                _session.Abort();
+                _session.DiscardSegment();
+                _session.SendSingle(SingleCommand.Stop);
+            }
+            PendingResult = null;
+            _pendingResults = null;
+            Fail(reason, keepReadings: false);
+            LogRunCommandsOnce();
         }
 
         /// <summary>每輪 CSV 的那一列是否已寫入。</summary>
@@ -247,6 +289,126 @@ namespace StressTest.Core
         /// <summary>研究人員確認的預熱讀數；尚未確認時為 null。</summary>
         public double? WarmupReading { get; private set; }
 
+        // ===== A 送法：整輪送完後的讀數 =====
+
+        private PacedRun _run;
+        private double _runStartSpeed;
+        private double? _finalReading;
+        private readonly System.Collections.Generic.List<double> _turns = new System.Collections.Generic.List<double>();
+        private System.Collections.Generic.List<SegmentResult> _pendingResults;
+
+        /// <summary>整輪送完後的逐筆傳送紀錄；還沒送完時為 null。</summary>
+        public PacedRun Run => _run;
+
+        /// <summary>要看錄影讀的轉向點數（有送出指令的段與段交界）。</summary>
+        public int TurnCount => !Config.IsContinuous ? 0
+            : _run == null ? Plan.Segments.Count - 1
+            : Math.Max(0, _run.SentBlockCount - 1);
+
+        /// <summary>A 送法：最後速度已確認，跑步機已送出停止。</summary>
+        public bool TreadmillStopped => _finalReading.HasValue;
+
+        /// <summary>停止指令沒有回覆的原因；正常時為 null。</summary>
+        public string StopWarning { get; private set; }
+
+        /// <summary>目前的步驟是否還需要序列連線。輸入轉向點與總結畫面不需要，拔線不該丟掉讀數。</summary>
+        public bool NeedsLink => State != RoundState.Completed && State != RoundState.Failed && !TreadmillStopped;
+
+        /// <summary>目前要輸入第幾個轉向點，從 0 起算。</summary>
+        public int TurnIndex => _turns.Count;
+
+        public System.Collections.Generic.IReadOnlyList<double> TurnReadings => _turns;
+
+        /// <summary>整輪送完當下的面板速度；還沒確認時為 null。</summary>
+        public double? FinalReading => _finalReading;
+
+        /// <summary>讀數全部輸入完、尚未確認時的各段結果；其他時候為 null。</summary>
+        public System.Collections.Generic.IReadOnlyList<SegmentResult> PendingResults => _pendingResults;
+
+        /// <summary>轉向點讀不到時放棄：不猜數字，整輪作廢。逐筆紀錄與電腦端計數仍保留。</summary>
+        public void GiveUpReadings()
+        {
+            if (State != RoundState.AwaitingTurnReading && State != RoundState.ConfirmingReadings) return;
+
+            IsVoided = true;
+            VoidReason = "轉向點讀數無法判讀";
+            _pendingResults = null;
+            Summary = NewSummary();
+            State = RoundState.Completed;
+        }
+
+        private bool _runStarted;
+        private bool _commandsLogged;
+
+        private void FinishContinuousRun()
+        {
+            _run = _session.CurrentRun;
+            // session 停在 AwaitingReading 直到最後速度確認，期間重開機才標記得到
+            ExpectedPanelSpeed = ExpectedFinalSpeed();
+            State = RoundState.AwaitingFinalReading;
+            if (_run.PcSent < _run.Count)
+            {
+                IsVoided = true;
+                VoidReason = "傳送提早結束，沒有送完全部指令";
+            }
+            LogRunCommandsOnce();
+        }
+
+        private double ExpectedFinalSpeed()
+        {
+            var expected = _runStartSpeed;
+            for (var i = 0; i < _run.SentBlockCount; i++) expected += _run.Blocks[i].ExpectedChange;
+            return expected;
+        }
+
+        private void LogRunCommandsOnce()
+        {
+            if (!_runStarted || _commandsLogged) return;
+            _run = _session.CurrentRun;
+            _commandsLogged = true;
+            _log?.WriteCommands(RoundId, Config, _session.Firmware, _run);
+        }
+
+        private void AskNextTurnOrReview()
+        {
+            if (_run.SentBlockCount == 0)
+            {
+                Summary = NewSummary();
+                State = RoundState.Completed;
+                return;
+            }
+            if (_turns.Count < TurnCount)
+            {
+                var from = _turns.Count == 0 ? _runStartSpeed : _turns[_turns.Count - 1];
+                ExpectedPanelSpeed = from + _run.Blocks[_turns.Count].ExpectedChange;
+                State = RoundState.AwaitingTurnReading;
+                return;
+            }
+
+            _pendingResults = new System.Collections.Generic.List<SegmentResult>();
+            var start = _runStartSpeed;
+            for (var i = 0; i < _run.SentBlockCount; i++)
+            {
+                var end = i < _turns.Count ? _turns[i] : _finalReading.Value;
+                _run.Blocks[i].StartSpeed = start;
+                _pendingResults.Add(new SegmentResult(_run.Blocks[i], end));
+                start = end;
+            }
+            State = RoundState.ConfirmingReadings;
+        }
+
+        private void ConfirmReadings()
+        {
+            for (var i = 0; i < _pendingResults.Count; i++)
+            {
+                _results.Add(_pendingResults[i]);
+                _log?.WriteSegmentResult(RoundId, _session.Firmware, i, _pendingResults[i]);
+            }
+            _pendingResults = null;
+            Summary = NewSummary();
+            State = RoundState.Completed;
+        }
+
         /// <summary>研究人員輸入面板速度（尚未確認）。</summary>
         public void EnterReading(double panelSpeed)
         {
@@ -255,6 +417,16 @@ namespace StressTest.Core
                 case RoundState.AwaitingWarmupReading:
                     _enteredReading = panelSpeed;
                     State = RoundState.ConfirmingWarmupReading;
+                    break;
+
+                case RoundState.AwaitingFinalReading:
+                    _enteredReading = panelSpeed;
+                    State = RoundState.ConfirmingFinalReading;
+                    break;
+
+                case RoundState.AwaitingTurnReading:
+                    _turns.Add(panelSpeed);
+                    AskNextTurnOrReview();
                     break;
 
                 case RoundState.AwaitingSegmentReading:
@@ -280,6 +452,23 @@ namespace StressTest.Core
                     {
                         State = RoundState.WarmupMismatch;
                     }
+                    break;
+
+                case RoundState.ConfirmingFinalReading:
+                    if (TreadmillStopped)
+                    {
+                        // 停止之後回來改最後速度，不用再停一次
+                        _finalReading = _enteredReading;
+                        AskNextTurnOrReview();
+                        break;
+                    }
+                    _session.CompleteRun();
+                    _finalReading = _enteredReading;
+                    BeginStop(now);
+                    break;
+
+                case RoundState.ConfirmingReadings:
+                    ConfirmReadings();
                     break;
 
                 case RoundState.ConfirmingSegmentReading:
@@ -320,6 +509,21 @@ namespace StressTest.Core
                 case RoundState.ConfirmingSegmentReading:
                     PendingResult = null;
                     State = RoundState.AwaitingSegmentReading;
+                    break;
+                case RoundState.ConfirmingFinalReading:
+                    State = RoundState.AwaitingFinalReading;
+                    break;
+                case RoundState.AwaitingTurnReading:
+                case RoundState.ConfirmingReadings:
+                    _pendingResults = null;
+                    if (_turns.Count == 0)
+                    {
+                        ExpectedPanelSpeed = ExpectedFinalSpeed();
+                        State = RoundState.AwaitingFinalReading;
+                        break;
+                    }
+                    _turns.RemoveAt(_turns.Count - 1);
+                    AskNextTurnOrReview();
                     break;
             }
         }
@@ -366,17 +570,43 @@ namespace StressTest.Core
         private void StartSegment(int index, double startSpeed, double now)
         {
             var planned = Plan.Segments[index];
-            if (!_session.StartSegment(Config.Mode, planned.Direction, planned.Count, Config.GapMs, startSpeed, now))
+            bool started;
+            if (Config.IsContinuous)
+            {
+                _runStartSpeed = startSpeed;
+                started = _session.RunContinuous(Plan.Segments, Config.GapMs, startSpeed, now);
+                _runStarted = started;
+            }
+            else
+            {
+                started = _session.StartSegment(Config.Mode, planned.Direction, planned.Count, Config.GapMs, startSpeed, now);
+            }
+            if (!started)
             {
                 Fail("無法開始這一段：Arduino 未連線或仍在處理上一段。");
                 return;
             }
-            SegmentIndex = index;
+            _segmentIndex = index;
             State = RoundState.RunningSegment;
         }
 
-        /// <summary>目前（或剛完成）的段索引，從 0 起算。</summary>
-        public int SegmentIndex { get; private set; }
+        private int _segmentIndex;
+
+        /// <summary>目前（或剛完成）的段索引，從 0 起算。連續傳送中是正在送的那一段。</summary>
+        public int SegmentIndex
+        {
+            get
+            {
+                if (!Config.IsContinuous) return _segmentIndex;
+                var run = _session.CurrentRun;
+                if (run == null) return 0;
+                for (var i = 0; i < run.Blocks.Count; i++)
+                {
+                    if (run.Blocks[i] == _session.CurrentSegment) return i;
+                }
+                return 0;
+            }
+        }
 
         private void SendSingle(SingleCommand command, double now)
         {
@@ -420,8 +650,17 @@ namespace StressTest.Core
             return false;
         }
 
-        private void Fail(string reason)
+        private void Fail(string reason, bool keepReadings = true)
         {
+            if (keepReadings && State == RoundState.Stopping && _finalReading.HasValue)
+            {
+                // 讀數已在手上，只是停止指令沒有回覆：提醒後繼續輸入轉向點
+                _awaitingAck = false;
+                StopWarning = reason;
+                AskNextTurnOrReview();
+                return;
+            }
+
             _awaitingAck = false;
             FailureReason = reason;
             State = RoundState.Failed;

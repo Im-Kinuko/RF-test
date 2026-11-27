@@ -58,11 +58,12 @@ namespace StressTest.Core
         /// <summary>
         /// 讀入一份每輪 CSV 的所有行，累加已完成的輪次；以標題名稱找欄位。
         /// 有 sets 欄的檔案是「每段 n 筆」那版設計的紀錄，整份不計入。沒有 send_mode 欄的檔案是 RUN。
+        /// A 送法只計入 flow 為 continuous（整輪連續）的列。
         /// 格式不符的列略過。回傳讀入的完成列數（含其他送法）。
         /// </summary>
         public int LoadRoundsCsv(IEnumerable<string> lines)
         {
-            int entryCol = -1, gapCol = -1, countCol = -1, statusCol = -1, modeCol = -1;
+            int entryCol = -1, gapCol = -1, countCol = -1, statusCol = -1, modeCol = -1, flowCol = -1;
             var headerSeen = false;
             var loaded = 0;
 
@@ -80,12 +81,13 @@ namespace StressTest.Core
                     countCol = System.Array.IndexOf(fields, "total_count");
                     statusCol = System.Array.IndexOf(fields, "status");
                     modeCol = System.Array.IndexOf(fields, "send_mode");
+                    flowCol = System.Array.IndexOf(fields, "flow");
                     if (entryCol < 0 || gapCol < 0 || countCol < 0 || statusCol < 0) return 0;
                     if (System.Array.IndexOf(fields, "sets") >= 0) return 0;
                     continue;
                 }
 
-                var needed = new[] { entryCol, gapCol, countCol, statusCol, modeCol }.Max();
+                var needed = new[] { entryCol, gapCol, countCol, statusCol, modeCol, flowCol }.Max();
                 if (fields.Length <= needed) continue;
                 if (fields[statusCol] != "completed") continue;
 
@@ -97,6 +99,9 @@ namespace StressTest.Core
                 if (!int.TryParse(fields[gapCol], out var gap) || !int.TryParse(fields[countCol], out var count)) continue;
                 var mode = SendMode.Burst;
                 if (modeCol >= 0 && !SendModeCodes.TryParse(fields[modeCol], out mode)) continue;
+
+                // A 送法現在整輪連續；先前每段停下來的 A 紀錄不算
+                if (mode == SendMode.Ack && (flowCol < 0 || fields[flowCol] != "continuous")) continue;
 
                 Record(entry, gap, count, voided: false, mode);
                 loaded++;

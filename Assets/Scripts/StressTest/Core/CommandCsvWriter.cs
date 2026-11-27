@@ -62,9 +62,15 @@ namespace StressTest.Core
             var c = CultureInfo.InvariantCulture;
 
             // 相鄰的前一筆也有時間戳時，才算得出休息時間
-            var gap = t.HasValue && timestamps.TryGetValue(position - 1, out var previous)
-                ? unchecked((uint)(t.Value.StartMicros - previous.EndMicros)).ToString(c)
-                : "";
+            var gap = "";
+            if (t.HasValue && timestamps.TryGetValue(position - 1, out var previous))
+            {
+                gap = unchecked((uint)(t.Value.StartMicros - previous.EndMicros)).ToString(c);
+            }
+            else if (position == 0)
+            {
+                gap = segment.GapFromPredecessor?.ToString(c) ?? "";
+            }
 
             _output.WriteLine(string.Join(",",
                 prefix,

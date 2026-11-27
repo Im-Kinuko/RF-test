@@ -49,7 +49,15 @@ namespace StressTest.Core
         public SegmentDirection Direction { get; }
         public int Count { get; }
         public int GapMs { get; }
-        public double StartSpeed { get; }
+
+        /// <summary>本段起點速度。連續傳送時先放理論值，輸入讀數後改為上一段的實際終點。</summary>
+        public double StartSpeed { get; internal set; }
+
+        /// <summary>屬於中間不停的整輪傳送。</summary>
+        public bool Continuous { get; internal set; }
+
+        /// <summary>連續傳送中的前一段；換方向那一次的休息時間要跨段計算。</summary>
+        public SegmentRun Predecessor { get; internal set; }
 
         public double ExpectedChange => (Direction == SegmentDirection.Up ? 1 : -1) * Count * SpeedStep;
         public double ExpectedEndSpeed => StartSpeed + ExpectedChange;
@@ -61,6 +69,13 @@ namespace StressTest.Core
 
         /// <summary>A 送法中電腦送出的每一筆；RUN 沒有逐筆紀錄。</summary>
         public IReadOnlyList<CommandRecord> Commands => _commands;
+
+        public int CountWithStatus(CommandStatus status)
+        {
+            var n = 0;
+            foreach (var c in _commands) if (c.Status == status) n++;
+            return n;
+        }
 
         /// <summary>電腦送出的筆數（A 送法）。</summary>
         public int PcSent => _commands.Count;
@@ -118,11 +133,28 @@ namespace StressTest.Core
             }
         }
 
-        /// <summary>段內相鄰兩筆之間的實際休息時間（µs）；中間缺一筆時不計。</summary>
+        /// <summary>
+        /// 換方向那一次的休息時間（µs）：前一段最後一筆到本段第一筆；任一筆沒有時間戳時為 null。
+        /// </summary>
+        public long? GapFromPredecessor
+        {
+            get
+            {
+                if (Predecessor == null || _timestamps.Count == 0 || _timestamps[0].Index != 0) return null;
+                var previous = Predecessor.Timestamps;
+                if (previous.Count == 0 || previous[previous.Count - 1].Index != Predecessor.Count - 1) return null;
+                return unchecked((uint)(_timestamps[0].StartMicros - previous[previous.Count - 1].EndMicros));
+            }
+        }
+
+        /// <summary>
+        /// 相鄰兩筆之間的實際休息時間（µs），含換方向那一次；中間缺一筆時不計。
+        /// </summary>
         public IEnumerable<long> Gaps
         {
             get
             {
+                if (GapFromPredecessor is long first) yield return first;
                 for (var i = 1; i < _timestamps.Count; i++)
                 {
                     if (_timestamps[i].Index == _timestamps[i - 1].Index + 1) yield return Gap(i);

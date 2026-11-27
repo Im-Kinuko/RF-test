@@ -81,7 +81,7 @@ namespace StressTest.Runtime
             UpdateScreenshot();
             if (_session == null) return;
 
-            if (!_link.IsOpen)
+            if (!_link.IsOpen && (_round == null || _round.NeedsLink))
             {
                 Disconnect();
                 _connectError = "序列埠已中斷。請確認 USB 線後重新連線。";
@@ -138,7 +138,18 @@ namespace StressTest.Runtime
         {
             _pacer?.Dispose(); // 先停傳送執行緒，才能關序列埠
             _pacer = null;
-            if (RoundIsActive) _roundMessage = "連線中斷，本輪未完成。已確認的段已寫入紀錄。";
+            if (RoundIsActive)
+            {
+                _roundMessage = "連線中斷，本輪記為作廢，已寫入的紀錄保留。跑步機可能還在轉，請確認並按跑步機上的停止鍵。";
+                try
+                {
+                    _round.Abandon("連線中斷或程式關閉");
+                }
+                catch (IOException e)
+                {
+                    _roundMessage += $"寫入紀錄失敗：{e.Message}";
+                }
+            }
             // 停在總結畫面時中斷或關閉：先補寫每輪那一列（Finish 只在 Completed／Failed 時有效）
             FinishRound(null);
             _round = null;
@@ -223,7 +234,8 @@ namespace StressTest.Runtime
             GUILayout.EndVertical();
 
             GUILayout.FlexibleSpace();
-            GUI.enabled = _session != null;
+            // 一輪進行中不能中斷連線：要停請用緊急停止
+            GUI.enabled = _session != null && !RoundIsActive;
             if (GUILayout.Button("中斷連線", _big, GUILayout.Width(Px(160)))) Disconnect();
             GUI.enabled = true;
             GUILayout.Space(Px(12));
@@ -467,9 +479,12 @@ namespace StressTest.Runtime
         }
 
         /// <summary>大字顯示預期速度、自動聚焦的輸入框；Enter 送出，解析成功才呼叫 onSubmit。</summary>
-        private void DrawReadingInput(double expectedSpeed, Action<double> onSubmit)
+        private void DrawReadingInput(double expectedSpeed, Action<double> onSubmit) =>
+            DrawReadingInput($"請看面板，預期 {expectedSpeed:F1} km/h", expectedSpeed, onSubmit);
+
+        private void DrawReadingInput(string title, double expectedSpeed, Action<double> onSubmit)
         {
-            GUILayout.Label($"請看面板，預期 {expectedSpeed:F1} km/h", _huge);
+            GUILayout.Label(title, _huge);
             if (expectedSpeed < PanelSpeedInput.Min - 1e-9)
             {
                 GUILayout.Label($"預期低於跑步機最低速度 {PanelSpeedInput.Min:F1}，面板會停在 {PanelSpeedInput.Min:F1}：請照實際面板輸入，這段會標記「可能觸底」。", _title);
@@ -478,7 +493,6 @@ namespace StressTest.Runtime
             {
                 GUILayout.Label($"預期高於跑步機最高速度 {PanelSpeedInput.Max:F1}：請照實際面板輸入，這段會標記「可能觸頂」。", _title);
             }
-
 
             var submit = false;
             var e = Event.current;

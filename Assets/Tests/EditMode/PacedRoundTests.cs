@@ -40,9 +40,8 @@ namespace StressTest.Tests
             arduino.LoseCommands.Add(3);
             var h = new RoundHarness(gapMs: 5, arduino: arduino, log: outputs.CreateLog(), mode: SendMode.Ack);
             h.StartAndWarmUp();
-            h.CompleteSegment(2.7); // 起點 1.0 → 2.7：17 格
-            h.CompleteSegment(1.0); // 2.7 → 1.0：17 格
-            h.AdvanceUntil(RoundState.Completed, maxSeconds: 2);
+            // 轉向點 2.7（起點 1.0 → 2.7：17 格），最後 1.0（2.7 → 1.0：17 格）
+            Complete(h, 1.0, 2.7);
             h.Round.Finish();
             return outputs;
         }
@@ -53,16 +52,25 @@ namespace StressTest.Tests
             Assert.That(new RoundConfig(gapMs: 5, totalCount: 40).Mode, Is.EqualTo(SendMode.Ack));
         }
 
+        /// <summary>整輪送完後：輸入最後速度、各轉向點，確認完成。</summary>
+        private static void Complete(RoundHarness h, double final, params double[] turns)
+        {
+            if (h.Round.State == RoundState.Idle) h.StartAndWarmUp();
+            h.AdvanceUntil(RoundState.AwaitingFinalReading);
+            h.Round.EnterReading(final);
+            h.Round.Confirm(h.Now);
+            h.AdvanceUntil(RoundState.AwaitingTurnReading, maxSeconds: 3);
+            foreach (var turn in turns) h.Round.EnterReading(turn);
+            h.Round.Confirm(h.Now);
+            Assert.That(h.Round.State, Is.EqualTo(RoundState.Completed));
+        }
+
         [Test]
         public void Round_SendsEveryCommandFromThePc_NeverRun()
         {
             var h = new RoundHarness(totalCount: 80, mode: SendMode.Ack);
-            h.StartAndWarmUp();
-            h.CompleteSegment(3.0);
-            h.CompleteSegment(1.0);
-            h.CompleteSegment(3.0);
-            h.CompleteSegment(1.0);
-            h.AdvanceUntil(RoundState.Completed, maxSeconds: 2);
+
+            Complete(h, 1.0, 3.0, 1.0, 3.0);
 
             Assert.That(h.Arduino.Received.Count(l => l.StartsWith("CMD,")), Is.EqualTo(80));
             Assert.That(h.Arduino.Received.Any(l => l.StartsWith("RUN,")), Is.False);
@@ -74,10 +82,10 @@ namespace StressTest.Tests
         public void LossIsSplitBetweenSerialLinkAndTreadmill()
         {
             var h = new RoundHarness(mode: SendMode.Ack, arduino: LosingThirdCommand());
-            h.StartAndWarmUp();
 
-            var result = h.CompleteSegment(2.7);
+            Complete(h, 1.0, 2.7);
 
+            var result = h.Round.Summary.Results[0];
             Assert.That(result.LinkLost, Is.EqualTo(1));        // 送 20、收 19
             Assert.That(result.PanelSteps, Is.EqualTo(17));
             Assert.That(result.TreadmillMissing, Is.EqualTo(2)); // 執行 19、面板 17
@@ -95,16 +103,11 @@ namespace StressTest.Tests
         public void OverReaction_ShowsAsNegativeTreadmillMissing()
         {
             var h = new RoundHarness(mode: SendMode.Ack);
-            h.StartAndWarmUp();
-            h.CompleteSegment(3.0);
 
-            var down = h.CompleteSegment(1.0); // 3.0 → 1.0：20 格
-            Assert.That((down.PanelSteps, down.TreadmillMissing), Is.EqualTo((20, (int?)0)));
+            Complete(h, 1.0, 3.2); // 加速 22 格、減速 22 格
 
-            var other = new RoundHarness(mode: SendMode.Ack);
-            other.StartAndWarmUp();
-            var up = other.CompleteSegment(3.2); // 22 格
-            Assert.That((up.TreadmillMissing, up.Drops), Is.EqualTo(((int?)(-2), 2)));
+            Assert.That(h.Round.Summary.Results.Select(r => (r.TreadmillMissing, r.Drops)),
+                Is.EqualTo(new[] { ((int?)(-2), 2), ((int?)(-2), 2) }));
         }
 
         [Test]
@@ -204,7 +207,7 @@ namespace StressTest.Tests
             arduino.LoseCommands.Add(5);
             var h = new RoundHarness(arduino: arduino, mode: SendMode.Ack);
             h.StartAndWarmUp();
-            h.AdvanceUntil(RoundState.AwaitingSegmentReading, maxSeconds: 0.8); // 卡在第 5 筆
+            h.AdvanceUntil(RoundState.AwaitingFinalReading, maxSeconds: 0.8); // 卡在第 5 筆
 
             h.Round.EmergencyStop(h.Now);
             h.AdvanceUntil(RoundState.Completed, maxSeconds: 3);
